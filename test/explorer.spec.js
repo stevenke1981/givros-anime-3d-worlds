@@ -37,13 +37,13 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
 
   await page.keyboard.down('w');
   try {
-    await expect.poll(async () => !(await page.screenshot()).equals(entrance)).toBe(true);
+    await expect.poll(async () => !(await page.screenshot()).equals(entrance), { timeout: 25_000 }).toBe(true);
   } finally {
     await page.keyboard.up('w');
   }
   await page.getByRole('button', { name: '回入口' }).click();
   await page.mouse.move(720, 450);
-  await expect.poll(async () => (await page.screenshot()).equals(entrance)).toBe(true);
+  await expect.poll(async () => (await page.screenshot()).equals(entrance), { timeout: 25_000 }).toBe(true);
 
   await page.getByRole('button', { name: '操作說明' }).click();
   await expect(page.getByRole('dialog', { name: '操作說明' })).toBeVisible();

@@ -32,6 +32,7 @@ let failed = false;
 let mode = 'scenic';
 let previousTime;
 let elapsed = 0;
+let needsDraw = true;
 
 function clearInput() {
   pressedKeys.clear();
@@ -50,6 +51,7 @@ function resize() {
     * Math.atan(Math.tan(MathUtils.degToRad(baseFov / 2)) * fit)));
   camera.updateProjectionMatrix();
   renderer.setSize(width, height, false);
+  needsDraw = true;
 }
 
 function setMode(nextMode) {
@@ -108,16 +110,25 @@ function moveCamera(delta) {
   }
 
   const eye = world.surfaceAt(camera.position.x, camera.position.z) + EYE_HEIGHT;
-  camera.position.y = MathUtils.damp(camera.position.y, eye, 18, delta);
+  const previousY = camera.position.y;
+  camera.position.y = Math.abs(previousY - eye) < 0.001
+    ? eye
+    : MathUtils.damp(previousY, eye, 18, delta);
+  return Boolean(turn || side || forward || camera.position.y !== previousY);
 }
 
 function drawFrame(time) {
   const delta = Math.min((time - (previousTime ?? time)) / 1000, 0.05);
   previousTime = time;
-  if (mode === 'walk' && !help.open) moveCamera(delta);
-  if (!reducedMotion.matches) elapsed += delta;
+  if (mode === 'walk' && !help.open && moveCamera(delta)) needsDraw = true;
+  if (!reducedMotion.matches) {
+    elapsed += delta;
+    needsDraw = true;
+  }
+  if (!needsDraw) return;
   world.update(elapsed, delta, reducedMotion.matches);
   renderer.render(world.scene, camera);
+  needsDraw = false;
 }
 
 function showFailure(message) {
@@ -156,6 +167,7 @@ window.addEventListener('keydown', (event) => {
 });
 window.addEventListener('keyup', (event) => pressedKeys.delete(event.code));
 window.addEventListener('blur', clearInput);
+reducedMotion.addEventListener('change', () => { needsDraw = true; });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearInput();
 });
@@ -175,6 +187,7 @@ canvas.addEventListener('pointermove', (event) => {
   );
   drag.x = event.clientX;
   drag.y = event.clientY;
+  needsDraw = true;
 });
 canvas.addEventListener('lostpointercapture', (event) => {
   if (event.pointerId === drag?.id) drag = undefined;
