@@ -20,7 +20,29 @@ CONTRACT = {
     "maple": ((6.64, 7.44, 6.28), 0.0, 23000),
     "shrub": ((1.98, 0.95, 1.96), 0.0, 2600),
     "fishing-rack": ((2.18, 1.63, 0.49), 0.0, 2500),
+    "teahouse": ((9.31, 5.61, 7.35), 0.0, 26000),
+    "water-basin": ((1.83, 1.26, 1.16), 0.0, 1400),
+    "maple-lod": ((6.54, 7.30, 6.38), 0.0, 7000),
 }
+
+
+def check_teahouse_opening(vertices, indices):
+    rays = [(x, y) for x in (-1.60, -1.17, -0.64, -0.19, 0.20, 0.67, 1.14, 1.59)
+            for y in (1.37, 1.54, 1.82, 1.95)]
+    for i in range(0, len(indices), 3):
+        a, b, c = (vertices[j] for j in indices[i:i + 3])
+        if max(a[2], b[2], c[2]) < 2.84 or min(a[2], b[2], c[2]) > 3.26:
+            continue
+        ux, uy = b[0] - a[0], b[1] - a[1]
+        vx, vy = c[0] - a[0], c[1] - a[1]
+        denominator = ux * vy - uy * vx
+        if abs(denominator) > 1e-8:
+            for x, y in rays:
+                m = ((x - a[0]) * vy - (y - a[1]) * vx) / denominator
+                n = (ux * (y - a[1]) - uy * (x - a[0])) / denominator
+                if m >= 0 and n >= 0 and m + n <= 1:
+                    z = a[2] + m * (b[2] - a[2]) + n * (c[2] - a[2])
+                    assert not 2.84 <= z <= 3.26, f"Blocked tea counter sightline at {x=}, {y=}"
 
 
 def verify():
@@ -52,6 +74,11 @@ def verify():
                     deck.extend((x, y, z) for x, y, z in vertices if abs(y) < 0.001)
                 if name == "plank-bridge" and node["name"].startswith("Split cedar"):
                     deck.extend((x, y, z) for x, y, z in vertices if abs(y - 0.18) < 0.001)
+                if name == "water-basin" and node["name"].startswith("Trough surface"):
+                    assert any(abs(y - 0.543) < 0.001 for x, y, z in vertices)
+                    assert max(y for x, y, z in vertices) > 0.90
+                if name == "teahouse":
+                    check_teahouse_opening(vertices, indices)
                 positions.extend(vertices)
                 triangles += len(indices) // 3
         assert 1 <= len(assemblies) <= 8 and 0 < triangles <= budget, (name, triangles)

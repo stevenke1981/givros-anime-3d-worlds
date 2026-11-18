@@ -9,10 +9,10 @@ from mathutils import Vector
 ART = Path(__file__).resolve().parent
 MODELS = ART.parent / "public" / "models"
 ROWS = (
-    ("snow-inn", "temple", "festival-stall"),
+    ("snow-inn", "temple", "festival-stall", "teahouse"),
     ("dock", "plank-bridge", "fishing-boat", "fishing-rack"),
     ("onsen-pool", "sluice", "retaining-wall", "festival-lantern"),
-    ("maple", "shrub"),
+    ("maple", "maple-lod", "shrub", "water-basin"),
 )
 
 
@@ -25,7 +25,7 @@ def preview():
     camera_data.ortho_scale = 16
     camera = bpy.data.objects.new(camera_data.name, camera_data)
     scene.collection.objects.link(camera)
-    angle = Vector((10, -16, 11.3))
+    angle = Vector((10, -16, 9.3))
     rotation = (-angle).to_track_quat("-Z", "Y")
     camera.location = angle
     camera.rotation_euler = rotation.to_euler()
