@@ -201,11 +201,9 @@ function surfaceMaterial(clock, sun, spec, kind) {
 export function addHydrology(scene, layout, sun) {
   const { spec,paddies,baseWaterAt,centerAt,spanAt,seaEdge }=layout;
   const clock={value:0};
-  const materials=[];
   function add(kind,w,h,point) {
     const material=surfaceMaterial(clock,sun,spec,kind);
     material.uniforms.clock=clock;
-    materials.push(material);
     const water=grid(w,h,point,material);
     water.name='Watershed '+kind;
     scene.add(water);
@@ -223,11 +221,10 @@ export function addHydrology(scene, layout, sun) {
     return [x,spec.coast.level,mix(shoreline,156,v),null,null,1-Math.min(1,v*29)];
   });
   if (spec.lake) {
-    const {x,z,rx,rz,level}=spec.lake;
-    add('lake',54,54,(u,v)=>{
+    add('lake',76,76,(u,v)=>{
       const du=2*u-1,dv=2*v-1,edge=Math.max(Math.abs(du),Math.abs(dv));
-      const scale=edge/(Math.hypot(du,dv)||1);
-      return [x+du*rx*scale,level,z+dv*rz*scale,null,null,edge];
+      const [x,z]=layout.lakeBoundary(Math.atan2(dv,du),edge);
+      return [x,spec.lake.level,z,null,null,edge];
     });
   }
   for (const [x,z,rx,rz,y] of paddies) add('paddy',16,16,(u,v)=>{
@@ -267,10 +264,10 @@ export function addSteam(scene, pool) {
     transparent:true,depthWrite:false,
     vertexShader:`attribute float age; varying float fade;
       void main(){vec4 p=modelViewMatrix*vec4(position,1.);fade=sin(age*3.14159);
-      gl_PointSize=clamp(140.*(1.+age)/max(1.,-p.z),7.,85.);
+      gl_PointSize=clamp(175.*(1.+age)/max(1.,-p.z),8.,115.);
       gl_Position=projectionMatrix*p;}`,
     fragmentShader:`varying float fade;
-      void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor=vec4(.86,.92,.95,exp(-d*d*4.)*(1.-smoothstep(.69,1.,d))*fade*.09);}`
+      void main(){float d=length(gl_PointCoord-.5)*2.;gl_FragColor=vec4(.86,.92,.95,exp(-d*d*4.)*(1.-smoothstep(.69,1.,d))*fade*.17);}`
   });
   const steam=new THREE.Points(geometry,material);
   steam.frustumCulled=false;

@@ -10,7 +10,7 @@ export async function loadRegionalAssets(layout, onProgress) {
   for (const building of buildings) names.add(building.model);
   for (const bridge of crossings) names.add(bridge.model);
   if (paddies.length) { names.add('rice'); names.add('river-sedge'); }
-  if (dock) { names.add('dock'); names.add('fishing-boat'); }
+  if (dock) { names.add('dock'); names.add('fishing-boat'); names.add('river-sedge'); }
   if (spec.coast) names.add('fishing-rack');
   if (spec.sluice) names.add('sluice');
   if (spec.pool) names.add('onsen-pool');
@@ -134,13 +134,22 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
   const tints=['#e0efc6','#bdcda3','#d5d9ab','#dfe6ca','#e4eee3','#bcccbf'].map(hex=>new THREE.Color(hex));
   const autumn=['#e96952','#f59c5b','#f8c166','#e9874c','#d66b51','#e1b068'].map(hex=>new THREE.Color(hex));
   const [primary,secondary,density]=spec.ecology;
+  const reserveSanctuaryShot=spec.sanctuary.model==='temple' || spec.grove;
+  const [eyeX,,eyeZ]=spec.featured.position,[aimX,,aimZ]=spec.featured.target;
+  const vx=aimX-eyeX,vz=aimZ-eyeZ;
+  const shotLength=vx*vx+vz*vz;
+  function inSanctuaryShot(x,z) {
+    if (!reserveSanctuaryShot) return false;
+    const t=Math.max(0,Math.min(1,((x-eyeX)*vx+(z-eyeZ)*vz)/shotLength));
+    return Math.hypot(x-eyeX-t*vx,z-eyeZ-t*vz)<3.6;
+  }
   for (let i=0;i<690*density;i++) {
     const x=mix(-71,71,rand()),z=mix(-81,44,rand());
     const [lane]=routeBlend(x,z),y=groundAt(x,z),edge=Math.min(riverEdge(x,z),seaEdge(x,z));
     const field=paddies.some(([a,b,rx,rz])=>paddyShape(x-a,z-b,rx+1,rz+1)<1.15);
     const rural=buildings.some(b=>Math.abs(b.x-x)<6.0&&Math.abs(b.z-z)<5.7);
     const clustered=Math.sin(x*.33-z*.16)+.82*Math.cos(x*.16+z*.43);
-    if (field || rural || lane<2.15 || y<waterAt(x,z)+.22 || edge<1.8 || clustered<-.60 ||
+    if (field || rural || inSanctuaryShot(x,z) || lane<2.15 || y<waterAt(x,z)+.22 || edge<1.8 || clustered<-.60 ||
         Math.hypot(x-spec.sanctuary.x,z-spec.sanctuary.z)<6.3) continue;
     if (Math.abs(z-stairs.start)<5&&Math.abs(x-stairs.x)<3.6) continue;
     if (visited.some(([a,b])=>(x-a)**2+(z-b)**2<2.38)) continue;
@@ -163,7 +172,7 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     for (let i=0;i<160;i++) {
       const x=mix(-15.5,7,rand()),z=mix(-25,17,rand());
       const [lane]=routeBlend(x,z);
-      if (lane<2.0 || lane>4.6 || riverEdge(x,z)<1.2 ||
+      if (lane<2.0 || lane>4.6 || riverEdge(x,z)<1.2 || inSanctuaryShot(x,z) ||
           Math.hypot(x-spec.gate[0],z-spec.gate[1])<3.1 ||
           visited.some(([a,b])=>(x-a)**2+(z-b)**2<1.8) ||
           buildings.some(b=>Math.abs(x-b.x)<4.9&&Math.abs(z-b.z)<4.5)) continue;
@@ -196,6 +205,21 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     }
   }
   function rndClear(x,z) { return !blocked.some(([a,b,s])=>Math.hypot(x-a,z-b)<s+.2); }
+
+  if (spec.lake) {
+    for (let i=0;i<145;i++) {
+      const angle=rand()*Math.PI*2;
+      const [x,z]=layout.lakeBoundary(angle,mix(1.005,1.057,rand()));
+      const y=groundAt(x,z);
+      if (routeBlend(x,z)[0]<1.72 || riverEdge(x,z)<.58 ||
+          Math.cos(angle*7.2)+Math.sin(angle*11)<-.50) continue;
+      const scale=mix(.24,.64,rand());
+      prop('rock',x,z,rand()*6.28,scale,-.10,paints[i%5]);
+      if (i%2===0 && y<spec.lake.level+.67) {
+        prop('river-sedge',x+.29,z-.11,rand()*6.28,scale*1.42,-.01,tints[i%6]);
+      }
+    }
+  }
 
   for (const [x,z,rx,rz,y] of paddies) {
     for (let dx=-rx;dx<rx;dx+=.75) for (let dz=-rz;dz<rz;dz+=.78) {

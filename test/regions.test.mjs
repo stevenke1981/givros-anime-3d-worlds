@@ -50,3 +50,28 @@ for (const [index,id] of ids.entries()) {
     }
   });
 }
+
+test('Temple photo is at walkable eye height with a clear sightline above the hillside', () => {
+  const world = createRegionalLayout('06');
+  const {position:[x,y,z],target:[tx,ty,tz]} = world.spec.featured;
+  assert.ok(world.canWalk(x,z));
+  assert.ok(Math.abs(y-world.surfaceAt(x,z)-1.65)<.08);
+  for (let t=0;t<1;t+=.04) {
+    const [cx,cy,cz]=[x+(tx-x)*t,y+(ty-y)*t,z+(tz-z)*t];
+    assert.ok(cy-world.groundAt(cx,cz)>1.25);
+  }
+});
+
+test('Warped lake contours match the physical waterline, dock and outlet', () => {
+  const world = createRegionalLayout('09');
+  const {x,z,rx,rz}=world.spec.lake;
+  const scales=[];
+  for (let i=0;i<48;i++) {
+    const a=i*Math.PI/24, [px,pz]=world.lakeBoundary(a);
+    scales.push(Math.hypot((px-x)/rx,(pz-z)/rz));
+    assert.ok(Math.abs(world.seaEdge(px,pz))<1e-8);
+    assert.equal(world.waterAt(...world.lakeBoundary(a,.98)),world.spec.lake.level);
+  }
+  assert.ok(Math.max(...scales)-Math.min(...scales)>.18);
+  assert.ok(world.baseWaterAt(world.crossings[0].z)<world.spec.lake.level);
+});
