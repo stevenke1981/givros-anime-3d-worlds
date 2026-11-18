@@ -12,6 +12,7 @@ The runtime loads the matching file from [public/models](../public/models). Posi
 | shrine.glb | 7.31 × 5.25 × 6.82 | 16,510 | Raised porch, steps and enclosed timber hall. |
 | sakura.glb | 7.68 × 7.83 × 6.78 | 12,540 | Upright anchor at the trunk root. |
 | cedar.glb | 4.35 × 9.10 × 4.48 | 6,768 | Upright anchor at the trunk root. |
+| cedar-lod.glb | 4.36 × 9.10 × 4.57 | 1,988 | Distant cedar with the same height, anchor and branching profiles. |
 | stone-lantern.glb | 0.88 × 2.08 × 0.88 | 408 | Grounded base with an open central chamber. |
 | rock.glb | 2.40 × 1.14 × 1.85 | 110 | Bank boulder and companion stones on a shared ground anchor. |
 | bamboo.glb | 2.92 × 6.72 × 2.85 | 5,544 | Seven culms with joint collars, lateral branches and bent leaves. |
@@ -30,6 +31,8 @@ From the repository root, use PowerShell and adjust the Blender path for your in
     & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/preview_sakura.py
 
 The build rewrites the editable library and GLBs. For direct edits in Blender, export only the selected scene's mesh assemblies with **+Y Up** enabled. The verifier reads the GLB buffers to check paint, normals, triangulation, origins, bridge profile, gate clearance and stair placement. The preview reimports the exported GLBs to render a contact sheet.
+
+[GLB inspection contact sheet](sakura-assets.png)
 
 ## Provenance
 

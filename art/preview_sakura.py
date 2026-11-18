@@ -10,8 +10,8 @@ ART = Path(__file__).resolve().parent
 MODELS = ART.parent / "public" / "models"
 ROWS = (
     ("house", "bridge", "torii", "shrine"),
-    ("sakura", "cedar", "bamboo", "stone-lantern"),
-    ("rock", "rice", "fence", "stair-tread"),
+    ("sakura", "cedar", "cedar-lod", "bamboo"),
+    ("stone-lantern", "rock", "rice", "fence", "stair-tread"),
 )
 
 
@@ -42,7 +42,9 @@ def preview():
             size = hi - lo
             scale = min(3.55 / size.x, 2.90 / size.y)
             center = (hi + lo) / 2
-            target = Vector(((col - 1.5) * 3.93, (1 - row) * 3.52 + 0.09, 0))
+            stride = 15.72 / len(names)
+            scale *= min(1, stride / 3.93)
+            target = Vector(((col - (len(names) - 1) / 2) * stride, (1 - row) * 3.52 + 0.09, 0))
             for obj in objects:
                 obj.scale *= scale
                 obj.location = obj.location * scale + rotation @ (target - center * scale)
