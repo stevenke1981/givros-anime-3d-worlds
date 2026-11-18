@@ -224,6 +224,7 @@ async function loadRequestedScenes() {
     const descriptor = requestedScene;
     requestedScene = undefined;
     let next;
+    let reportProgress = true;
     try {
       if (descriptor === activeScene) {
         explorer.dataset.state = 'ready';
@@ -237,7 +238,7 @@ async function loadRequestedScenes() {
         : await import('./world/regions/index.js');
       if (requestedScene || failed) continue;
       const progress = (_fraction, message) => {
-        if (!requestedScene && !failed && message) notice.textContent = descriptor.name + ' · ' + message;
+        if (reportProgress && !requestedScene && !failed && message) notice.textContent = descriptor.name + ' · ' + message;
       };
       next = descriptor.id === '01'
         ? await module.createSakuraWorld({ renderer, onProgress: progress })
@@ -297,6 +298,8 @@ async function loadRequestedScenes() {
       explorer.dataset.state = 'error';
       notice.textContent = '無法載入「' + descriptor.name + '」。請重試或選擇其他場景。';
       retry.hidden = false;
+    } finally {
+      reportProgress = false;
     }
   }
   loading = false;

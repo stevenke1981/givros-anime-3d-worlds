@@ -90,3 +90,32 @@ test('a newer menu choice wins when an older world is still loading', async ({ p
   await expect(page).toHaveURL(/scene=10/);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('夏祭燈籠山村');
 });
+
+test('a failed model preserves the retry message when a remaining model finishes', async ({ page }) => {
+  const explorer = page.locator('#explorer');
+  await page.goto('./');
+  await expect(explorer).toHaveAttribute('data-scene', '01', { timeout: 70_000 });
+  let releaseModel;
+  const pausedModel = new Promise((resolve) => { releaseModel = resolve; });
+  await page.route('**/models/onsen-pool.glb', async (route) => {
+    await pausedModel;
+    await route.continue();
+  });
+  await page.route('**/models/snow-inn.glb', (route) => route.fulfill({ status: 404 }));
+
+  const remainingModel = page.waitForResponse('**/models/onsen-pool.glb');
+  try {
+    await chooseScene(page, '07');
+    await expect(explorer).toHaveAttribute('data-state', 'error');
+  } finally {
+    releaseModel();
+  }
+  const remainingResponse = await remainingModel;
+  expect(remainingResponse.ok()).toBe(true);
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('status')).toContainText('無法載入「雪國溫泉山村」');
+  await expect(explorer).toHaveAttribute('data-scene', '01');
+  await page.unroute('**/models/snow-inn.glb');
+  await page.getByRole('button', { name: '重新載入' }).click();
+  await expect(explorer).toHaveAttribute('data-scene', '07', { timeout: 70_000 });
+});

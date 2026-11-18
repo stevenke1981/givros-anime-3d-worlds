@@ -17,6 +17,7 @@ export function disposeScene(scene) {
     if (texture?.isTexture) textures.add(texture);
   }
   for (const material of materials) {
+    for (const texture of material.userData.ownedTextures ?? []) textures.add(texture);
     for (const value of Object.values(material)) {
       if (value?.isTexture) textures.add(value);
     }

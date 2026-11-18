@@ -3,21 +3,23 @@ import test from 'node:test';
 import { DataTexture, Mesh, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry, Scene } from 'three';
 import { createGaussianDetail } from '../src/detail/gaussian-detail.js';
 import { disposeScene } from '../src/world/dispose-scene.js';
+import { groundMaterial } from '../src/world/ground-material.js';
 
 test('replacing a scene disposes each shared resource exactly once', () => {
   const texture = new DataTexture(new Uint8Array(4), 1, 1);
-  const material = new MeshStandardMaterial({ map: texture, roughnessMap: texture });
+  const detail = new DataTexture(new Uint8Array(4), 1, 1);
+  const material = groundMaterial(detail, { map: texture, roughnessMap: texture });
   const geometry = new PlaneGeometry();
   const scene = new Scene();
   scene.add(new Mesh(geometry, material), new Mesh(geometry, material));
   const calls = [];
-  for (const [name, resource] of Object.entries({ geometry, material, texture })) {
+  for (const [name, resource] of Object.entries({ detail, geometry, material, texture })) {
     resource.addEventListener('dispose', () => calls.push(name));
   }
 
   disposeScene(scene);
 
-  assert.deepEqual(calls.toSorted(), ['geometry', 'material', 'texture']);
+  assert.deepEqual(calls.toSorted(), ['detail', 'geometry', 'material', 'texture']);
   assert.equal(scene.children.length, 0);
 });
 
