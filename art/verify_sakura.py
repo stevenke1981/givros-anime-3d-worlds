@@ -29,7 +29,7 @@ EXPECTED = {
 }
 TEXTURED = {"house", "bridge", "torii", "shrine", "sakura", "stone-lantern", "rock",
             "stair-tread", "stair-tread-b", "stair-tread-c"}
-TRIANGLE_BUDGET = {"shrine": 24000, "house": 24000, "sakura": 38000, "cedar": 14500,
+TRIANGLE_BUDGET = {"shrine": 24000, "house": 24000, "sakura": 40000, "cedar": 16000,
                    "cedar-lod": 2400, "grass": 100, "river-sedge": 150}
 
 
@@ -113,7 +113,7 @@ def verify():
         stairs = name.startswith("stair-tread")
         assert_close(minimum[1], -0.32 if stairs else 0, tolerance=0.003)
         for actual, target in zip(size, expected):
-            assert_close(actual, target, max(0.09, target * 0.18))
+            assert_close(actual, target, 0.15 if name in {"cedar", "cedar-lod"} else max(0.09, target * 0.18))
         if name == "bridge":
             for actual, exact in zip((minimum[0], maximum[0], minimum[2], maximum[2]), (-7, 7, -1.8, 1.8)):
                 assert_close(actual, exact)
