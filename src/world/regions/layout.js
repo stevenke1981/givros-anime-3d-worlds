@@ -3,6 +3,7 @@ import { regionSpecs } from './specs.js';
 
 const modelSizes = {
   house: [4.12,3.12],
+  teahouse: [4.12,3.12],
   'snow-inn': [4.12,3.12],
   shrine: [3.14,2.94],
   temple: [4.21,3.14],

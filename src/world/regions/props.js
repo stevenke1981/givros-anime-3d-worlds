@@ -14,6 +14,8 @@ export async function loadRegionalAssets(layout, onProgress) {
   if (spec.coast) names.add('fishing-rack');
   if (spec.sluice) names.add('sluice');
   if (spec.pool) names.add('onsen-pool');
+  if (spec.basin) names.add('water-basin');
+  if (spec.ecology.includes('maple')) names.add('maple-lod');
   if (spec.festival) names.add('festival-lantern');
   const loader = new GLTFLoader();
   let loaded=0;
@@ -82,6 +84,10 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     }
   }
   prop('torii',...spec.gate);
+  if (spec.basin) {
+    prop('water-basin',...spec.basin,.18);
+    blocked.push([...spec.basin,.91]);
+  }
   lanterns.forEach(([x,z],i)=>prop('stone-lantern',x,z,.19*i,.90+(.06*(i%3))));
   if (spec.sluice) put('sluice',spec.sluice[0],spec.sluice[2],spec.sluice[1],Math.PI*.50);
   if (spec.pool) {
@@ -146,13 +152,28 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     let s = model==='shrub' ? mix(.63,1.35,rand()) : model==='rock' ?
       mix(.62,1.75,rand()) : mix(.56,1.22,rand());
     if (model==='maple') s*=.85;
-    const m=model==='cedar' && (z<-53 || Math.abs(x)>47) ? 'cedar-lod' : model;
+    const m=(model==='cedar'||model==='maple') && (z<-53 || Math.abs(x)>47) ? model+'-lod' : model;
     const tone=model==='maple'&&primary==='maple' ? autumn[Math.floor(rand()*autumn.length)] :
       tints[Math.floor(rand()*tints.length)];
     put(m,x,y-.075,z,rand()*Math.PI*2,s,s*mix(.82,1.19,rand()),s,tone);
     visited.push([x,z]);
     if (m!=='shrub' && Math.abs(x)<48 && z>=-54) blocked.push([x,z,s*(model==='bamboo'?.89:model==='rock'?.65:.42)]);
   }
+  if (spec.grove) {
+    for (let i=0;i<160;i++) {
+      const x=mix(-15.5,7,rand()),z=mix(-25,17,rand());
+      const [lane]=routeBlend(x,z);
+      if (lane<2.0 || lane>4.6 || riverEdge(x,z)<1.2 ||
+          Math.hypot(x-spec.gate[0],z-spec.gate[1])<3.1 ||
+          visited.some(([a,b])=>(x-a)**2+(z-b)**2<1.8) ||
+          buildings.some(b=>Math.abs(x-b.x)<4.9&&Math.abs(z-b.z)<4.5)) continue;
+      const s=mix(.76,1.28,rand());
+      put('bamboo',x,groundAt(x,z)-.095,z,rand()*6.28,s,s*mix(.95,1.23,rand()),s,tints[i%6]);
+      visited.push([x,z]);
+      blocked.push([x,z,s*.93]);
+    }
+  }
+
   // Forest structures continue toward the foothills while staying out of the dry clearings.
   for (let i=0;i<125;i++) {
     const x=mix(-73,77,rand()),z=mix(-108,-63,rand());
@@ -195,10 +216,10 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     put('grass',x,y-.032,z,rand()*6.28,s,s*mix(.85,1.23,rand()),s,tints[i%6]);
   }
 
-  const treeModels=new Set(['cedar','cedar-lod','maple','bamboo']);
+  const treeModels=new Set(['cedar','cedar-lod','maple','maple-lod','bamboo']);
   for (const [name,positions] of groups) {
     const kind=treeModels.has(name)?'tree':name==='shrub'?'shrub':undefined;
-    const cast=!['grass','rice','river-sedge','cedar-lod','stair-tread'].includes(name);
+    const cast=!['grass','rice','river-sedge','cedar-lod','maple-lod','stair-tread'].includes(name);
     if (kind||name==='grass'||name==='rice') {
       const chunks=new Map();
       for (const item of positions) {
@@ -207,14 +228,14 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
         chunks.get(cell).push(item);
       }
       for (const chunk of chunks.values()) {
-        if (name!=='cedar') {
+        if (name!=='cedar' && name!=='maple') {
           addInstances(scene,assets[name],chunk,cast,kind);
           continue;
         }
         const [x,,z]=chunk[Math.floor(chunk.length/2)];
         const level=new THREE.LOD();
         level.position.set(x,0,z);
-        for (const [variant,distance] of [['cedar',0],['cedar-lod',31]]) {
+        for (const [variant,distance] of [[name,0],[name+'-lod',name==='maple'?24:31]]) {
           const batch=new THREE.Group();
           batch.position.set(-x,0,-z);
           addInstances(batch,assets[variant],chunk,cast,kind);
