@@ -39,4 +39,3 @@ test('stairs descend to the torii, and structures, rice basins and outside terra
   assert.equal(canWalk(bounds.east + .01, 22), false);
   for (const [x, z] of paddies) assert.equal(canWalk(x, z), false);
 });
-

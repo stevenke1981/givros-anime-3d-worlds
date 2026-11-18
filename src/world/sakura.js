@@ -140,7 +140,7 @@ function populate(scene, assets) {
     }
   }
   for (const [x, z] of [[-20.35,-33.7],[-15.6,-34.8],[-20.3,-42.3],[-15.69,-42.3],
-    [-21.56,-44.37],[-14.42,-44.37],[-11.1,.97],[-9.65,-23.9]]) {
+    [-21.56,-44.37],[-14.42,-44.37],[-11.1,.97],[-11.9,-23.9]]) {
     lanterns.push([x, groundAt(x,z), z, rand() * .64, .88 + rand() * .16]);
     hitCircles.push([x, z, .49]);
   }
@@ -157,8 +157,17 @@ function populate(scene, assets) {
     }
   }
 
-  batchAsset(scene, assets.cedar, cedarNear);
-  batchAsset(scene, assets.cedar, cedarFar, { castShadow: false, receiveShadow: false });
+  for (const [placements, shadow] of [[cedarNear, true], [cedarFar, false]]) {
+    const groves = new Map();
+    for (const tree of placements) {
+      const cell = `${Math.floor(tree[0] / 29)},${Math.floor(tree[2] / 29)}`;
+      if (!groves.has(cell)) groves.set(cell, []);
+      groves.get(cell).push(tree);
+    }
+    for (const trees of groves.values()) {
+      batchAsset(scene, assets.cedar, trees, { castShadow: shadow, receiveShadow: shadow });
+    }
+  }
   batchAsset(scene, assets.bamboo, bamboo);
   batchAsset(scene, assets.rock, rock);
   batchAsset(scene, assets.rice, rice, { castShadow: false });
@@ -283,4 +292,3 @@ export async function createSakuraWorld({ renderer, onProgress = () => {} } = {}
     }
   };
 }
-
