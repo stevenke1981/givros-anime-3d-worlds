@@ -2,6 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRegionalLayout } from '../src/world/regions/layout.js';
 
+test('the open teahouse foundation stays below the visible floor', () => {
+  const { groundAt, buildings } = createRegionalLayout('05');
+  const { x, y, z, r } = buildings.find((building) => building.model === 'teahouse');
+  for (const localX of [-3.7, -2, 0, 2, 3.7]) {
+    for (const localZ of [-2.8, -1, 0, 1, 2.8]) {
+      const worldX = x + localX * Math.cos(r) + localZ * Math.sin(r);
+      const worldZ = z - localX * Math.sin(r) + localZ * Math.cos(r);
+      assert.ok(groundAt(worldX, worldZ) < y + 0.14, localX + ', ' + localZ);
+    }
+  }
+});
+
 const ids = Array.from({length: 9}, (_,i) => String(i+2).padStart(2,'0'));
 const landmarks = ['river-bridge','shrine','water-gate','teahouse','temple','onsen','harbour','jetty','festival-court'];
 
