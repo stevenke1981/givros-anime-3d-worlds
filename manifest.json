@@ -1,0 +1,56 @@
+{
+  "version": "2.0",
+  "language": "English prompts; Traditional Chinese guide",
+  "scenes": [
+    {
+      "file": "prompts/01_sakura_mountain_village.md",
+      "title": "春櫻山村｜Spring Sakura Mountain Village",
+      "bytes": 20016
+    },
+    {
+      "file": "prompts/02_summer_riverside_valley.md",
+      "title": "盛夏溪谷村｜Summer Riverside Valley",
+      "bytes": 19672
+    },
+    {
+      "file": "prompts/03_bamboo_forest_shrine.md",
+      "title": "竹林神社秘徑｜Bamboo Forest Shrine Path",
+      "bytes": 19723
+    },
+    {
+      "file": "prompts/04_rice_terrace_farming_village.md",
+      "title": "水田梯田農村｜Rice Terrace Farming Hamlet",
+      "bytes": 19921
+    },
+    {
+      "file": "prompts/05_autumn_maple_post_village.md",
+      "title": "紅葉山道宿場村｜Autumn Maple Mountain Hamlet",
+      "bytes": 19668
+    },
+    {
+      "file": "prompts/06_cedar_mountain_temple.md",
+      "title": "杉林山寺與岩壁｜Cedar Mountain Temple Trail",
+      "bytes": 19735
+    },
+    {
+      "file": "prompts/07_winter_snow_onsen_hamlet.md",
+      "title": "雪國溫泉山村｜Winter Snow Onsen Hamlet",
+      "bytes": 19758
+    },
+    {
+      "file": "prompts/08_seaside_fishing_village.md",
+      "title": "海岬漁村｜Seaside Fishing Hamlet",
+      "bytes": 19832
+    },
+    {
+      "file": "prompts/09_mountain_lake_village.md",
+      "title": "山中湖畔聚落｜Mountain Lake Village",
+      "bytes": 19889
+    },
+    {
+      "file": "prompts/10_summer_festival_village.md",
+      "title": "夏祭燈籠山村｜Summer Festival Village",
+      "bytes": 20103
+    }
+  ]
+}
