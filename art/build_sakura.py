@@ -58,10 +58,91 @@ def material(name, roughness, double_sided=False):
     return result
 
 
+def detail_material(name, roughness, pattern):
+    result = material(name, roughness)
+    nodes = result.node_tree.nodes
+    links = result.node_tree.links
+    rng = Random(2944)
+    size = 128
+    grid = {(cols, rows): [rng.random() for _ in range(cols * rows)]
+            for cols, rows in ((4, 4), (12, 12), (32, 32), (64, 5), (48, 3), (8, 4))}
+
+    def noise(x, y, cols, rows):
+        x, y = x * cols % cols, y * rows % rows
+        ix, iy = int(x), int(y)
+        sx, sy = x - ix, y - iy
+        sx, sy = sx * sx * (3 - 2 * sx), sy * sy * (3 - 2 * sy)
+        field = grid[cols, rows]
+        a, b = iy * cols, ((iy + 1) % rows) * cols
+        j = (ix + 1) % cols
+        return (field[a + ix] * (1 - sx) + field[a + j] * sx) * (1 - sy) + (
+            field[b + ix] * (1 - sx) + field[b + j] * sx) * sy
+
+    colors, heights = [], []
+    for row in range(size):
+        y = row / size
+        for col in range(size):
+            x = col / size
+            grain = noise(x, y, 32, 32)
+            grit = rng.random()
+            stains = noise(x, y, 4, 4)
+            if pattern == "stone":
+                moss = max(0, (stains * 0.74 + noise(x, y, 12, 12) * 0.26 - 0.62)) * 2.1
+                m = 0.78 + 0.18 * grain + 0.10 * grit - 0.12 * moss
+                colors.extend((m * (1 - 0.12 * moss), m, m * (1 - 0.24 * moss), 1.0))
+                heights.append((0.50 * grain + 0.25 * grit + 0.25 * stains) * 0.87)
+            elif pattern == "wood":
+                bend = 0.041 * noise(x, y, 8, 4) + 0.009 * sin(2 * pi * y)
+                streak = noise(x + bend, y, 64, 5)
+                wide = noise(x + bend, y, 48, 3)
+                m = 0.76 + 0.17 * wide + 0.14 * streak - 0.15 * max(0, 0.26 - streak)
+                colors.extend((m, m * (0.98 - 0.05 * wide), m * (0.95 - 0.06 * wide), 1.0))
+                heights.append((0.65 * streak + 0.21 * wide + 0.14 * grit) * 0.70)
+            else:
+                m = 0.78 + 0.13 * stains + 0.07 * grain + 0.07 * grit
+                colors.extend((m * 0.985, m, m, 1.0))
+                heights.append((0.16 * stains + 0.36 * grit + 0.48 * grain) * 0.46)
+
+    normal_pixels = []
+    for row in range(size):
+        for col in range(size):
+            dx = heights[row * size + (col + 1) % size] - heights[row * size + (col - 1) % size]
+            dy = heights[((row + 1) % size) * size + col] - heights[((row - 1) % size) * size + col]
+            normal = Vector((-dx * 1.6, -dy * 1.6, 1)).normalized()
+            normal_pixels.extend((*((channel + 1) / 2 for channel in normal), 1.0))
+
+    image_nodes = []
+    for suffix, pixels, colorspace in (("weathering", colors, "sRGB"), ("relief", normal_pixels, "Non-Color")):
+        image = bpy.data.images.new(f"Sakura {pattern} {suffix}", size, size, alpha=False)
+        image.colorspace_settings.name = colorspace
+        image.pixels.foreach_set(pixels)
+        image.pack()
+        node = nodes.new("ShaderNodeTexImage")
+        node.image = image
+        image_nodes.append(node)
+    vertex = next(node for node in nodes if node.type == "VERTEX_COLOR")
+    shader = nodes.get("Principled BSDF")
+    multiply = nodes.new("ShaderNodeMix")
+    multiply.data_type = "RGBA"
+    multiply.blend_type = "MULTIPLY"
+    multiply.inputs[0].default_value = 1.0
+    links.new(image_nodes[0].outputs["Color"], multiply.inputs[6])
+    links.new(vertex.outputs["Color"], multiply.inputs[7])
+    links.new(multiply.outputs[2], shader.inputs["Base Color"])
+    normal_node = nodes.new("ShaderNodeNormalMap")
+    normal_node.inputs["Strength"].default_value = 0.72 if pattern == "stone" else 0.56
+    links.new(image_nodes[1].outputs["Color"], normal_node.inputs["Color"])
+    links.new(normal_node.outputs["Normal"], shader.inputs["Normal"])
+    result["surface_pattern"] = pattern
+    return result
+
+
 SATIN = material("Paint | satin lacquer", 0.36)
 MATTE = material("Paint | timber, tile and plaster", 0.84)
-FOLIAGE = material("Paint | leaves and blossoms", 0.92)
-MASONRY = material("Paint | stone", 0.91)
+FOLIAGE = material("Paint | leaves and blossoms", 0.92, double_sided=True)
+MASONRY = detail_material("Granite | mineral grain and recessed weathering", 0.92, "stone")
+TIMBER = detail_material("Cedar | split grain and rubbed fibers", 0.86, "wood")
+FIRED_TILE = detail_material("Kawara | fired clay and ash mottling", 0.76, "tile")
 LEAVES = material("Paint | thin, two-sided leaves", 0.92, double_sided=True)
 RITUAL_PAPER = material("Paint | thin, two-sided paper", 0.86, double_sided=True)
 
@@ -179,6 +260,21 @@ class Mesh:
         if self.smooth:
             mesh.polygons.foreach_set("use_smooth", [True] * len(mesh.polygons))
         mesh.update()
+        surface = self.finish.get("surface_pattern")
+        if surface:
+            uv = mesh.uv_layers.new(name="Weathering")
+            for poly in mesh.polygons:
+                a, b = sorted(sorted(range(3), key=lambda axis: abs(poly.normal[axis]))[:2])
+                coordinates = [mesh.vertices[i].co for i in poly.vertices]
+                if surface == "wood":
+                    spans = [max(p[i] for p in coordinates) - min(p[i] for p in coordinates) for i in (a, b)]
+                    if spans[0] > spans[1]:
+                        a, b = b, a
+                    u_scale, v_scale = 2.5, 0.79
+                else:
+                    u_scale, v_scale = (1.8, 1.8) if surface == "stone" else (1.1, 1.1)
+                for loop, p in zip(poly.loop_indices, coordinates):
+                    uv.uv[loop].vector = p[a] * u_scale + p[b] * 0.029, p[b] * v_scale
         mesh.materials.append(self.finish)
         obj = bpy.data.objects.new(self.name, mesh)
         scene.collection.objects.link(obj)
@@ -205,31 +301,38 @@ def foundation(mesh, width, depth, floor, stone=STONE):
                      (0.30, depth / rows - 0.013, floor), RNG.choice(stone), 0.06)
 
 
+def roof_height(eave, rise, t, u):
+    return eave + rise * (1 - t) ** 1.30 + 0.14 * t ** 7 + 0.12 * abs(u) ** 10 * t ** 2
+
+
+def roof_tile(mesh, height, side, half_width, half_depth, upper, lower, left, right, paint):
+    # The molded concave pan sweeps into a rounded edge. Courses overlap downhill.
+    vertices = []
+    for along, lip in ((0, 0.0), (0.54, 0.012), (1, 0.040)):
+        t = upper + (lower - upper) * along
+        for across, crown in ((0, 0.069), (0.18, 0.030), (0.5, 0.017), (0.82, 0.027), (1, 0.067)):
+            u = left + (right - left) * across
+            vertices.append((u * half_width, side * half_depth * t, height(t, u) + crown + lip))
+    vertices.extend((x, y, z - 0.047) for x, y, z in vertices[10:15])
+    faces = [(i * 5 + k, i * 5 + k + 1, (i + 1) * 5 + k + 1, (i + 1) * 5 + k)
+             for i in range(3) for k in range(4)]
+    if side < 0:
+        faces = [tuple(reversed(face)) for face in faces]
+    mesh.add(vertices, faces, [paint] * 8 + [TILES[0]] * 4)
+
+
 def kawara(roof, framing, half_width, half_depth, eave, rise):
-    # Cross section sampled from ridge to the slightly upturned lower edge.
     def height(t, u):
-        return eave + rise * (1 - t) ** 1.30 + 0.14 * t ** 7 + 0.12 * abs(u) ** 10 * t ** 2
+        return roof_height(eave, rise, t, u)
 
     for side in (-1, 1):
         for i in range(9):
             t0, t1 = i / 9, (i + 1) / 9
             for j in range(14):
                 u0, u1 = 2 * j / 14 - 1, 2 * (j + 1) / 14 - 1
-                tile_color = RNG.choices((0, 1, 2, 3, 4), (1, 8, 5, 1, 5))[0]
+                paint = RNG.choices(TILES, (1, 12, 5, 1, 8))[0]
                 t_lower = t1 + 0.017 if i < 8 else t1
-                vertices = []
-                for t, lip in ((t0, 0), (t_lower, 0.025)):
-                    for k in range(5):
-                        u = u0 + (u1 - u0) * k / 4
-                        bump = (0.055 if k in (0, 4) else 0.015)
-                        vertices.append((u * half_width, side * half_depth * t, height(t, u) + bump + lip))
-                for k in range(4):
-                    roof.add([vertices[k], vertices[k + 1], vertices[k + 6], vertices[k + 5]],
-                             [(0, 1, 2, 3)] if side > 0 else [(3, 2, 1, 0)],
-                             TILES[min(tile_color + 1, 4)] if k == 1 and tile_color < 3 else TILES[tile_color])
-                    e0, e1 = vertices[k + 5], vertices[k + 6]
-                    roof.add([e0, e1, (e1[0], e1[1], e1[2] - 0.063), (e0[0], e0[1], e0[2] - 0.063)],
-                             [(0, 1, 2, 3)] if side > 0 else [(3, 2, 1, 0)], TILES[0])
+                roof_tile(roof, height, side, half_width, half_depth, t0, t_lower, u0, u1, paint)
         for u in (-1, 1):
             points = [(u * half_width, side * half_depth * i / 10, height(i / 10, u) - 0.07)
                       for i in range(11)]
@@ -246,13 +349,13 @@ def kawara(roof, framing, half_width, half_depth, eave, rise):
             framing.beam((x, side * half_depth * 0.77, height(0.77, u) - 0.17),
                          (x, side * half_depth * 0.98, height(0.98, u) - 0.17),
                          0.087, 0.10, RNG.choice(WOOD), 0.012)
-        # The underside closes the tile courses for low-angle views.
-        under = [[(x * half_width * 0.992, side * half_depth * t,
-                   height(t, x) - 0.105) for x in (-1, -0.75, 0, 0.75, 1)]
-                 for t in (0, 0.25, 0.5, 0.75, 1)]
-        if side < 0:
-            under = [list(reversed(row)) for row in under]
-        framing.rings(under, WOOD[0], caps=False, wrap=False)
+        # Solid tongue-and-groove sheathing remains visible beneath the exposed raised rafters.
+        for i in range(34):
+            u0, u1 = (i / 17 - 1) * 0.99, ((i + 1) / 17 - 1) * 0.99
+            under = [[(u * half_width, side * half_depth * t, height(t, u) + z)
+                      for u, z in ((u0, -0.118), (u1, -0.118), (u1, -0.065), (u0, -0.065))]
+                     for t in (0, 0.20, 0.40, 0.60, 0.76, 0.88, 0.99)]
+            framing.rings(under, WOOD[0 if i % 5 == 0 else 1])
     ridge_z = height(0, 0)
     for i in range(14):
         x0 = (2 * i / 14 - 1) * half_width
@@ -273,8 +376,8 @@ def building(shrine=False):
     w, d = width / 2, depth / 2
     front = -d + (0.83 if shrine else 0)
     walls = Mesh("Plaster, infill and lattice")
-    frame = Mesh("Timber frame, sill and rafters")
-    roof = Mesh("Fired roof tiles and ridge caps")
+    frame = Mesh("Timber frame, sill, tongue-and-groove soffit and rafters", TIMBER)
+    roof = Mesh("Fired roof tiles and ridge caps", FIRED_TILE)
     rocks = Mesh("Cut stone foundations and steps", MASONRY)
     hardware = Mesh("Fittings, paper and plaque", SATIN)
     pieces = [rocks, walls, frame, roof, hardware]
@@ -290,6 +393,13 @@ def building(shrine=False):
                 frame.box((x, y, (wall_top + wall_base) / 2),
                           (0.17, 0.19, wall_top - wall_base + 0.13), WOOD[1])
             center = (panel_start + panel_end) / 2
+            transom = roof_height(wall_top + 0.20, 1.61 if shrine else 1.91, abs(y) / (d + 0.55), 0)
+            high = transom - 0.07
+            low = wall_top + 0.05
+            walls.box((center, y, (high + low) / 2), (width / 4 + 0.010, 0.13, high - low), PAPER[3])
+            for slat in range(4):
+                x = panel_start + (slat + 0.5) * width / 16
+                frame.box((x, y - 0.085, (high + low) / 2), (0.042, 0.072, high - low), WOOD[2], 0.006)
             is_door = y < 0 and col in (1, 2)
             has_window = y < 0 or col in (1, 2)
             relief = (-0.12 if y < 0 else 0.12)
@@ -502,116 +612,221 @@ def torii():
     return [stone, post, crown]
 
 
+def cherry_blossom(mesh, center, direction, radius, phase, paint):
+    """Folded five-petal flower with a central cup and cleft petal tips."""
+    n = direction.normalized()
+    u = n.cross(Vector((0, 1, 0))).normalized()
+    v = n.cross(u)
+    vertices = [center - n * radius * 0.08]
+    faces = []
+    for petal in range(5):
+        angle = phase + petal * 2 * pi / 5
+        start = len(vertices)
+        for turn, length, cup in ((-0.46, 0.42, 0.12), (-0.36, 0.93, 0.26), (0, 0.87, 0.14),
+                                  (0.35, 1, 0.31), (0.46, 0.44, 0.10)):
+            edge = cos(angle + turn) * u + sin(angle + turn) * v
+            vertices.append(center + radius * (edge * length + n * cup))
+        faces.extend([(0, start, start + 1, start + 2), (0, start + 2, start + 3, start + 4)])
+    mesh.add(vertices, faces, paint)
+
+
 def sakura():
-    wood = Mesh("Root flare, forked trunk and flowering limbs")
-    buds = Mesh("Clouds of blossoms and individually swept petal sprays", FOLIAGE, smooth=True)
+    wood = Mesh("Forked cherry trunk, exposed roots and swept branchlets", TIMBER, smooth=True)
+    buds = Mesh("Five-lobed cupped sakura flowers", FOLIAGE, smooth=True)
+    leaves = Mesh("Young serrate cherry leaves", LEAVES, smooth=True)
     trunk = [(0, 0, 0), (0.01, -0.07, 0.44), (-0.12, -0.02, 1.25),
              (-0.33, 0.14, 2.26), (-0.17, 0.25, 3.02), (0.12, 0.33, 3.78),
              (0.28, 0.55, 4.64), (0.69, 0.59, 5.19)]
-    wood.stem(trunk, [0.62, 0.45, 0.35, 0.31, 0.27, 0.22, 0.13, 0.035], CEDAR_WOOD, 10)
+    wood.stem(trunk, [0.59, 0.45, 0.35, 0.31, 0.27, 0.22, 0.13, 0.035], CEDAR_WOOD[1], 12)
     for angle in (0.1, 1.22, 2.20, 3.39, 4.55, 5.21):
         x, y = cos(angle), sin(angle)
         wood.stem([(0, 0, 0.37), (x * 0.42, y * 0.42, 0.18), (x * 0.92, y * 0.92, 0.08)],
-                  [0.20, 0.14, 0.024], CEDAR_WOOD, 6)
+                  [0.20, 0.14, 0.024], CEDAR_WOOD[1], 7)
     limbs = [
-        (2, (-1.65, -0.20, 2.96), (-3.28, -0.35, 4.46)),
-        (3, (0.66, -0.69, 3.42), (2.22, -1.72, 4.91)),
-        (4, (-0.89, -1.07, 4.05), (-1.66, -2.47, 5.40)),
-        (4, (-1.21, 0.87, 4.39), (-2.63, 1.91, 5.45)),
-        (5, (0.75, 1.21, 4.82), (1.64, 2.45, 5.80)),
-        (5, (1.31, 0.38, 4.73), (3.40, 0.13, 5.67)),
-        (6, (0.20, 0.67, 5.33), (-0.67, 0.39, 6.60)),
-        (6, (0.89, -0.18, 5.24), (1.44, -0.61, 6.37)),
+        (2, (-1.65, -0.20, 2.96), (-3.04, -0.60, 4.35)),
+        (3, (0.66, -0.69, 3.42), (2.05, -1.80, 4.68)),
+        (4, (-0.89, -1.07, 4.05), (-1.52, -2.36, 5.19)),
+        (4, (-1.21, 0.87, 4.39), (-2.54, 1.76, 5.40)),
+        (5, (0.75, 1.21, 4.82), (1.46, 2.44, 5.64)),
+        (5, (1.31, 0.38, 4.73), (3.01, 0.13, 5.54)),
+        (6, (0.20, 0.67, 5.33), (-0.67, 0.39, 6.57)),
+        (6, (0.89, -0.18, 5.24), (1.44, -0.61, 6.30)),
     ]
-    for start, elbow, end in limbs:
+    spring = palette("6d8050 8b9559 acaa72")
+    for limb, (start, elbow, end) in enumerate(limbs):
         a, b, c = Vector(trunk[start]), Vector(elbow), Vector(end)
-        mid = b.lerp(c, 0.62) + Vector((0.09, 0, -0.09))
-        wood.stem([a, b, mid, c], [0.25 - start * 0.017, 0.136, 0.086, 0.026], CEDAR_WOOD)
-        for index in range(4):
-            root = b.lerp(c, 0.17 + index * 0.24)
-            angle = RNG.uniform(0, 2 * pi)
-            tip = root + Vector((cos(angle) * 0.65, sin(angle) * 0.82, RNG.uniform(0.55, 0.96)))
-            wood.stem([root, root.lerp(tip, 0.49), tip], [0.069, 0.043, 0.009], CEDAR_WOOD, 5)
-            s = RNG.uniform(0.63, 0.95)
-            buds.volume(tuple(tip), (s * 1.15, s, s * 0.48), FLOWERS, 8, 3, 0.19)
-            for j in range(6):
-                phase = j * pi / 3 + RNG.uniform(-0.4, 0.4)
-                f = RNG.uniform(0.28, 0.72)
-                center = tip + Vector((cos(phase) * f, sin(phase) * f, RNG.uniform(-0.21, 0.44)))
-                p = RNG.uniform(0.22, 0.38)
-                buds.volume(center, (p * 1.22, p, p * 0.66), FLOWERS, 6, 2, 0.17)
-            # Five small folded petal lobes leave negative space around the coarse cluster edges.
-            for j in range(3):
-                phase = (j + RNG.random()) * 2 * pi / 3
-                flower = tip + Vector((cos(phase) * s, sin(phase) * s, RNG.uniform(-0.20, 0.09)))
-                for k in range(5):
-                    angle = phase + k * 2 * pi / 5
-                    petal = flower + Vector((cos(angle) * 0.080, sin(angle) * 0.080, -0.015))
-                    buds.volume(petal, (0.086, 0.072, 0.037), FLOWERS[(j + k) % 3 + 3], 5, 1, 0.06)
-    return [wood, buds]
+        mid = b.lerp(c, 0.64) + Vector((0.08, 0.04, -0.08))
+        wood.stem([a, b, mid, c], [0.24 - start * 0.016, 0.129, 0.075, 0.020], CEDAR_WOOD[2], 9)
+        for fork in range(6):
+            root = b.lerp(c, 0.06 + fork * 0.175)
+            theta = 2.39 * (fork + limb) + RNG.uniform(-0.4, 0.4)
+            lateral = Vector((cos(theta), sin(theta), 0))
+            tip = root + lateral * RNG.uniform(0.30, 0.62) + Vector((0, 0, RNG.uniform(0.52, 0.91)))
+            elbow_point = root.lerp(tip, 0.55) + lateral * 0.13
+            wood.stem([root, elbow_point, tip], [0.035, 0.024, 0.006], CEDAR_WOOD[2], 5)
+            for spray in range(4):
+                angle = theta + 1.87 * spray
+                ray = Vector((cos(angle), sin(angle), 0))
+                node = elbow_point.lerp(tip, 0.12 + spray * 0.27)
+                end_point = node + ray * RNG.uniform(0.19, 0.43) + Vector((0, 0, RNG.uniform(-0.11, 0.18)))
+                wood.stem([node, end_point], [0.008, 0.003], CEDAR_WOOD[3], 4)
+                for j in range(7):
+                    phase = angle + j * 2.40 + RNG.uniform(-0.35, 0.35)
+                    rise = RNG.uniform(-0.12, 0.16)
+                    radial = Vector((cos(phase), sin(phase), 0))
+                    reach = RNG.uniform(0.045, 0.15)
+                    center = node.lerp(end_point, 0.28 + j * 0.112) + radial * reach + Vector((0, 0, rise))
+                    facing = radial * 0.68 + Vector((0, 0, RNG.uniform(-0.90, 1.10)))
+                    radius = RNG.uniform(0.075, 0.144)
+                    lightness = (2 + ((limb + spray) % 2)) if rise < -0.06 else 4
+                    cherry_blossom(buds, center, facing, radius, phase, RNG.choice(FLOWERS[lightness:]))
+                for offset in (0.38, 0.81):
+                    blade(leaves, node.lerp(end_point, offset), (cos(angle), sin(angle)),
+                          RNG.uniform(-0.05, 0.11), RNG.uniform(0.16, 0.25), 0.030, spring[1:])
+    return [wood, buds, leaves]
+
+
+def cedar_spray(mesh, root, tip, breadth, paint, teeth):
+    """One folded, toothed cedar branchlet, placed in mirrored irregular fans."""
+    axis = tip - root
+    cross = Vector((-axis.y, axis.x, 0)).normalized()
+    vertices = [root]
+    for i in range(teeth):
+        t = (i + 1) / (teeth + 1)
+        mid = root.lerp(tip, t)
+        width = breadth * sin(pi * t) ** 0.58 * (1 if i % 2 == 0 else 0.43)
+        vertices.extend([mid - cross * width, mid + Vector((0, 0, 0.10 * width)), mid + cross * width])
+    vertices.append(tip)
+    faces = [(0, 1, 2), (0, 2, 3)]
+    for i in range(teeth - 1):
+        a = 1 + i * 3
+        faces.extend([(a, a + 3, a + 4, a + 1), (a + 1, a + 4, a + 5, a + 2)])
+    k = len(vertices) - 4
+    faces.extend([(k, k + 3, k + 1), (k + 1, k + 3, k + 2)])
+    mesh.add(vertices, faces, [paint[0], paint[1]] * (teeth + 1))
 
 
 def cedar(distant=False):
-    wood = Mesh("Cedar trunk, exposed roots and bent fans")
-    needles = Mesh("Overlapping cedar sprays", FOLIAGE)
-    wood.stem([(0, 0, 0), (0.027, -0.06, 1.23), (-0.06, 0.08, 3.85),
-               (0.04, -0.02, 6.3), (0.03, 0, 8.82)],
-              [0.30, 0.225, 0.155, 0.094, 0.017], CEDAR_WOOD, 9)
-    for level in range(9):
-        z = 1.99 + level * 0.79
-        span = 2.03 - level * 0.192
-        arms = 5 if level < 4 else 4
-        for arm in range(arms):
-            phase = 2 * pi * arm / arms + 1.31 * level
-            dx, dy = cos(phase), sin(phase)
-            tip = Vector((dx * span, dy * span, z - 0.24 + RNG.uniform(-0.13, 0.12)))
-            if not distant or level < 2:
-                wood.stem([(0, 0, z), (tip.x * 0.56, tip.y * 0.56, z - 0.32), tip],
-                          [0.066, 0.045, 0.012], CEDAR_WOOD, 5)
-            if distant:
-                for offset, half_width in ((0.44, 0.63), (0.89, 0.54)):
-                    scale = 0.73 + span * 0.22
-                    needles.volume((tip.x * offset, tip.y * offset, z + 0.09),
-                                   (scale * half_width, scale * half_width, scale * 0.39),
-                                   PINE, 5, 2, 0.11)
-                continue
-            for offset, count in ((0.42, 2), (0.72, 2), (0.96, 1)):
-                for sign in (-1, 1) if count > 1 else (0,):
-                    cx = tip.x * offset + dy * sign * span * 0.15
-                    cy = tip.y * offset - dx * sign * span * 0.15
-                    scale = (1.0 - offset * 0.45) * (0.70 + span * 0.22)
-                    needles.volume((cx, cy, z + 0.11 * sin(offset * pi)),
-                                   (scale * 0.70, scale * 0.66, scale * 0.47), PINE, 7, 2, 0.15)
-    needles.volume((0.027, -0.01, 8.47), (0.49, 0.46, 0.63), PINE, 7, 3, 0.19)
+    wood = Mesh("Swept cedar trunk and loaded branches", smooth=True)
+    needles = Mesh("Interleaved pendent needle fans", LEAVES, smooth=True)
+    trunk = [(0, 0, 0), (0.042, -0.025, 1.30), (-0.07, 0.055, 3.4),
+             (-0.02, -0.09, 5.77), (0.11, 0.02, 7.68), (0.035, 0.00, 9.10)]
+    wood.stem(trunk, [0.296, 0.224, 0.162, 0.104, 0.053, 0.008], CEDAR_WOOD[1], 9)
+    branch_rng = Random(28223)
+    for index in range(35):
+        h = 1.92 + index * 0.200 + branch_rng.uniform(-0.18, 0.18)
+        phase = index * 2.399963 + branch_rng.uniform(-0.33, 0.33)
+        t = (h - 1.7) / 7.58
+        span = (2.26 * (1 - t) ** 0.76 + 0.11) * branch_rng.uniform(0.78, 1.04)
+        outward = Vector((cos(phase), sin(phase), 0))
+        lateral = Vector((-outward.y, outward.x, 0))
+        base = Vector((0.02, 0.0, h + 0.25))
+        elbow = base + outward * span * 0.57 + Vector((0, 0, -0.32))
+        tip = base + outward * span + Vector((0, 0, branch_rng.uniform(-0.33, 0.15)))
+        if not distant or index < 5:
+            wood.stem([base, elbow, tip], [0.040 * (1 - t) + 0.012, 0.027 * (1 - t) + 0.007, 0.004],
+                      CEDAR_WOOD[2], 5)
+        paint = PINE[1 + index % 3:3 + index % 3]
+        for offset in ((0.43, 0.70, 0.88) if distant else (0.34, 0.55, 0.72, 0.88)):
+            root = base.lerp(elbow, offset * 2) if offset <= 0.5 else elbow.lerp(tip, (offset - 0.5) * 2)
+            for sign in (-1, 1):
+                width = (0.38 + 0.35 * span) * (1 - 0.53 * offset)
+                endpoint = root + sign * lateral * width + outward * width * 0.60
+                endpoint.z -= 0.28 * (1 - offset) * width
+                cedar_spray(needles, root, endpoint, width * (0.51 if distant else 0.37),
+                            paint, 2 if distant else 5)
+                if not distant:
+                    for feather in range(2):
+                        fork = root.lerp(endpoint, 0.29 + feather * 0.25)
+                        tuft = fork + (sign * lateral * 0.31 + outward * 0.69) * width
+                        tuft.z += (feather - 1) * 0.06
+                        cedar_spray(needles, fork, tuft, width * 0.18, paint, 3)
+        if not distant or index % 2 == 0:
+            cedar_spray(needles, elbow, tip + outward * 0.10, span * 0.13, paint, 3 if distant else 6)
+    for i in range(9):
+        a = i * 2.40
+        root = Vector((0.03, 0.02, 8.42 + i * 0.056))
+        tip = root + Vector((cos(a) * 0.41, sin(a) * 0.41, 0.19))
+        cedar_spray(needles, root, tip, 0.14, PINE[3:5], 3)
+    # Both export variants carry the same footprint around the unchanged trunk anchor.
+    x_scale, y_scale = (0.96, 1.04) if distant else (0.875, 0.94)
+    for group in (wood, needles):
+        group.vertices = [(x * x_scale, y * y_scale, z) for x, y, z in group.vertices]
     return [wood, needles]
 
 
+def chipped_ashlar(mesh, bounds, levels, paint, rng, chips=0.021):
+    """Stone cut with uneven edge arrises, chipped nosing and a deliberately level crown."""
+    (left, right), (back, front) = bounds
+    w, d = right - left, front - back
+    jitter = [rng.uniform(0.11, 0.28), rng.uniform(0.39, 0.55), rng.uniform(0.71, 0.83)]
+    rim = [(0.0, 0.18), (0.034, 0.052), *((t, 0) for t in jitter), (0.94, 0.026), (1.0, 0.16),
+           (0.997, 0.81), (0.945, 0.96), *((t, 1) for t in reversed(jitter)), (0.059, 0.97), (0, 0.85)]
+    faults = [rng.uniform(-0.70, 0.70) for _ in rim]
+    center = Vector(((left + right) / 2, (back + front) / 2, 0))
+    rows = []
+    for level, (z, inset) in enumerate(levels):
+        row = []
+        for index, (x, y) in enumerate(rim):
+            pt = Vector((left + x * w, back + y * d, z))
+            direction = center - pt
+            direction.z = 0
+            offset = inset + chips * max(0, faults[index]) * (0.26 if level == 1 else 1.0)
+            pt += direction.normalized() * offset
+            if level == len(levels) - 1:
+                pt.z -= chips * max(0, -faults[index]) * 0.52
+            row.append(pt)
+        rows.append(row)
+    mesh.rings(rows, paint, caps=True)
+
+
 def lantern():
-    granite = Mesh("Granite lantern plinth, gabled cap and open chamber", MASONRY)
-    for radius, z0, z1 in ((0.44, 0, 0.10), (0.33, 0.10, 0.22),
-                           (0.25, 0.22, 0.29), (0.27, 0.98, 1.08)):
-        granite.stem([(0, 0, z0), (0, 0, z1)], [radius, radius * 0.96], STONE, 8)
-    granite.stem([(0, 0, 0.28), (0, 0, 0.41), (0, 0, 0.86), (0, 0, 0.99)],
-                 [0.20, 0.155, 0.135, 0.20], STONE[1], 8)
-    for z, r in ((1.10, 0.28), (1.18, 0.34), (1.47, 0.32)):
-        granite.rings([rectangle((-r, r), (-r, r), z), rectangle((-r, r), (-r, r), z + 0.07)],
-                      STONE[2])
+    granite = Mesh("Weathered sotoba plinth, fluted column and lotus tray", MASONRY)
+    chamber = Mesh("Chipped firebox corner posts and swept stone roof", MASONRY)
+    chipped_ashlar(granite, ((-0.44, 0.44), (-0.42, 0.42)),
+                  ((0, 0.022), (0.027, 0), (0.087, 0.004), (0.13, 0.036)), STONE[1], RNG, 0.027)
+    for profile, paint in [
+        (((0.120, 0.34), (0.148, 0.36), (0.198, 0.32), (0.225, 0.27)), STONE[1]),
+        (((0.219, 0.267), (0.243, 0.258), (0.272, 0.202), (0.299, 0.185)), STONE[0]),
+        (((0.293, 0.18), (0.349, 0.17), (0.4, 0.151), (0.58, 0.132), (0.80, 0.137),
+          (0.91, 0.169), (0.943, 0.178), (0.963, 0.189)), STONE[1]),
+        (((0.944, 0.19), (0.976, 0.196), (1.007, 0.214), (1.04, 0.263),
+          (1.08, 0.269), (1.105, 0.24)), STONE[2]),
+    ]:
+        granite.stem([(0, 0, z) for z, r in profile], [r for z, r in profile], paint, 12)
+    for z, r in ((1.10, 0.28), (1.17, 0.34), (1.46, 0.32)):
+        chipped_ashlar(chamber, ((-r, r), (-r, r)),
+                      ((z, 0.025), (z + 0.019, 0), (z + 0.054, 0.003), (z + 0.072, 0.016)),
+                      STONE[2], RNG, 0.014)
     for x in (-0.24, 0.24):
         for y in (-0.24, 0.24):
-            granite.box((x, y, 1.36), (0.13, 0.13, 0.32), STONE[1])
-    granite.rings([rectangle((-r, r), (-r, r), z)
-                   for r, z in ((0.39, 1.49), (0.44, 1.55), (0.37, 1.64), (0.22, 1.75), (0.11, 1.88))],
-                  STONE)
-    granite.stem([(0, 0, 1.87), (0, 0, 1.92), (0, 0, 2.02), (0, 0, 2.075)],
-                 [0.105, 0.112, 0.076, 0.020], STONE[1], 7)
-    return [granite]
+            chipped_ashlar(chamber, ((x - 0.062, x + 0.062), (y - 0.062, y + 0.062)),
+                          ((1.22, 0.003), (1.25, 0), (1.43, 0.008), (1.51, 0.001)),
+                          STONE[1], RNG, 0.009)
+    for side in range(4):
+        dx, dy = cos(side * pi / 2), sin(side * pi / 2)
+        # Roof cheeks turn upward at the four corners and meet beneath the lotus finial.
+        for i in range(10):
+            a, b = i / 5 - 1, (i + 1) / 5 - 1
+            rows = []
+            for r, z in ((0.40, 1.49), (0.44, 1.55), (0.415, 1.59), (0.347, 1.65),
+                         (0.251, 1.71), (0.175, 1.77), (0.108, 1.88)):
+                rows.append([(r * (dx - dy * s), r * (dy + dx * s),
+                              z + 0.084 * abs(s) ** 5 * (r / 0.44) ** 3) for s in (a, b)])
+            chamber.rings(rows, STONE[1], caps=False, wrap=False)
+        chamber.beam((0.40 * dx, 0.40 * dy, 1.53),
+                     (0.23 * dx, 0.23 * dy, 1.53), 0.28, 0.043, STONE[0])
+    chamber.stem([(0, 0, 1.87), (0, 0, 1.901), (0, 0, 1.936), (0, 0, 1.984), (0, 0, 2.02),
+                  (0, 0, 2.055), (0, 0, 2.075)],
+                 [0.124, 0.121, 0.102, 0.075, 0.062, 0.040, 0.012], STONE[1], 11)
+    return [granite, chamber]
 
 
 def rock():
-    river_stone = Mesh("Water-cut boulder with flaked wedge and companions", MASONRY)
-    river_stone.volume((-0.13, 0.04, 0.57), (1.10, 0.83, 0.57), RIVER, 9, 3, 0.22)
-    river_stone.volume((0.76, -0.24, 0.23), (0.52, 0.43, 0.23), RIVER, 7, 2, 0.20)
-    river_stone.volume((-0.76, 0.45, 0.17), (0.47, 0.30, 0.17), RIVER, 7, 2, 0.18)
+    river_stone = Mesh("Water-cut boulder with flaked wedge and companions", MASONRY, smooth=True)
+    river_stone.volume((-0.13, 0.04, 0.57), (1.10, 0.84, 0.57), RIVER, 13, 5, 0.13)
+    river_stone.volume((0.76, -0.24, 0.23), (0.52, 0.43, 0.23), RIVER, 9, 3, 0.20)
+    river_stone.volume((-0.76, 0.45, 0.17), (0.47, 0.30, 0.17), RIVER, 9, 3, 0.18)
     return [river_stone]
 
 
@@ -689,15 +904,45 @@ def fence():
     return [timber]
 
 
-def stair_tread():
-    treads = Mesh("Dressed granite riser with a level walkable surface", MASONRY)
-    rim = [(-1.5, -0.117), (-1.40, -0.19), (-0.56, -0.183), (0.31, -0.188),
-           (1.33, -0.182), (1.5, -0.12), (1.5, 0.137), (1.38, 0.19),
-           (-0.42, 0.185), (-1.39, 0.19), (-1.48, 0.13)]
-    treads.rings([[(x * scale, y * scale, z) for x, y in rim]
-                  for scale, z in ((0.94, -0.32), (1.0, -0.26), (1.0, -0.065), (0.98, 0))],
-                 STONE[1], caps=True)
+def stair_tread(variant=0):
+    treads = Mesh("Hand-dressed granite nosing, three individual voussoirs and recessed mortar", MASONRY)
+    joints = [(-0.39, 0.62), (-0.66, 0.34), (-0.23, 0.80)][variant]
+    divisions = [-1.5, *joints, 1.5]
+    for i, (a, b) in enumerate(zip(divisions, divisions[1:])):
+        if i != 0:
+            a += 0.007
+        if i != 2:
+            b -= 0.007
+        chipped_ashlar(treads, ((a, b), (-0.19, 0.19)),
+                      ((-0.32, 0.029), (-0.24, 0), (-0.071, 0.005), (-0.026, 0.003), (0, 0.022)),
+                      STONE[(variant + (i % 2) + 1) % 3], RNG, 0.024)
+    treads.box((0, 0.009, -0.17), (2.96, 0.327, 0.295), STONE[0], 0.022)
     return [treads]
+
+
+def meadow_tuft(sedge=False):
+    name = "Sedge leaves and tight golden panicles" if sedge else "Splayed meadow grass"
+    mesh = Mesh(name, LEAVES)
+    colors = palette("53683a 738650 849855 9aa66a")
+    dry = palette("746743 9c8756 b89e67")
+    for i in range(11 if sedge else 9):
+        angle = i * 2.40 + RNG.uniform(-0.27, 0.27)
+        dx, dy = cos(angle), sin(angle)
+        base = (dx * 0.033, dy * 0.036, 0)
+        length = RNG.uniform(0.23, 0.47) if sedge else RNG.uniform(0.13, 0.28)
+        bow = RNG.uniform(0.13, 0.30) if sedge else RNG.uniform(0.065, 0.166)
+        blade(mesh, base, (dx, dy), length, bow, RNG.uniform(0.012, 0.020), colors[i % 2:i % 2 + 2])
+    if sedge:
+        for i in range(3):
+            a = i * 2.40
+            x, y = cos(a) * 0.026, sin(a) * 0.026
+            tip = (x + cos(a) * 0.14, y + sin(a) * 0.14, 0.43 + 0.037 * i)
+            mesh.add([(x - 0.008, y, 0), (x + 0.008, y, 0),
+                      (tip[0] + 0.007, tip[1], tip[2]), (tip[0] - 0.007, tip[1], tip[2])],
+                     [(0, 1, 2, 3)], dry[i % 2])
+            mesh.volume((tip[0], tip[1], tip[2] + 0.01), (0.017, 0.013, 0.047),
+                        dry[i % 2 + 1], sides=5, strata=1, wobble=0.08)
+    return [mesh]
 
 
 def build():
@@ -710,6 +955,9 @@ def build():
         "sakura": sakura, "cedar": cedar, "stone-lantern": lantern, "rock": rock,
         "bamboo": bamboo, "rice": rice, "fence": fence, "stair-tread": stair_tread,
         "cedar-lod": lambda: cedar(distant=True),
+        "stair-tread-b": lambda: stair_tread(variant=1),
+        "stair-tread-c": lambda: stair_tread(variant=2),
+        "grass": meadow_tuft, "river-sedge": lambda: meadow_tuft(sedge=True),
     }
     for index, (name, design) in enumerate(library.items()):
         RNG.seed(170114 + index)
