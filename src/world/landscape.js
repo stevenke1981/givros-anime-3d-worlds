@@ -3,6 +3,7 @@ import {
   groundAt, laneDistance, mix, paddies, paddyShape, riverCenter, riverLevel,
   riverWidth, smooth
 } from './layout.js';
+import { groundMaterial } from './ground-material.js';
 
 export function randomSequence(initialSeed) {
   let seed = initialSeed >>> 0;
@@ -13,12 +14,13 @@ export function randomSequence(initialSeed) {
 }
 
 function landscapeMesh(w, h, pointAt, material) {
-  const positions = [], colors = [], indices = [];
+  const positions = [], colors = [], landCover = [], indices = [];
   for (let j = 0; j <= h; j++) {
     for (let i = 0; i <= w; i++) {
-      const [x, y, z, color] = pointAt(i / w, j / h);
+      const [x, y, z, color, cover] = pointAt(i / w, j / h);
       positions.push(x, y, z);
       if (color) colors.push(color.r, color.g, color.b);
+      if (cover) landCover.push(...cover);
       if (i === w || j === h) continue;
       const a = j * (w + 1) + i, b = a + w + 1;
       indices.push(a, b, a + 1, a + 1, b, b + 1);
@@ -27,6 +29,7 @@ function landscapeMesh(w, h, pointAt, material) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   if (colors.length) geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  if (landCover.length) geometry.setAttribute('landCover', new THREE.Float32BufferAttribute(landCover, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return new THREE.Mesh(geometry, material);
@@ -39,53 +42,61 @@ const extend = (value, lower, upper) => {
   return mix(lower, upper, (value - fringe) / (1 - 2 * fringe));
 };
 
-export function addTerrain(scene) {
+export function addTerrain(scene, detail) {
   const palette = {
-    grass: new THREE.Color('#82a952'),
-    straw: new THREE.Color('#b7be72'),
-    fern: new THREE.Color('#476548'),
-    path: new THREE.Color('#c3ad81'),
-    pathShade: new THREE.Color('#9e8e6a'),
-    sand: new THREE.Color('#b5a383'),
-    gravel: new THREE.Color('#777f70'),
-    mud: new THREE.Color('#716947'),
-    courtyard: new THREE.Color('#b8ada0')
+    grass: new THREE.Color('#77854e'),
+    straw: new THREE.Color('#a1a175'),
+    fern: new THREE.Color('#435b42'),
+    path: new THREE.Color('#b19a7a'),
+    pathShade: new THREE.Color('#8f7b62'),
+    sand: new THREE.Color('#a19784'),
+    gravel: new THREE.Color('#6e756b'),
+    mud: new THREE.Color('#6c644e'),
+    courtyard: new THREE.Color('#aaa296')
   };
   const rng = randomSequence(8109);
   const turf = landscapeMesh(372, 372, (u, v) => {
     const x = extend(u, -62, 62), z = extend(v, -76, 49);
     const y = groundAt(x, z);
-    const broad = .49 + .23 * Math.sin(x * .11 + z * .14) + .19 * Math.sin(z * .16 - x * .27) +
-      .08 * Math.sin(x * .74 + z * .38);
-    const grain = (rng() - .46) * .11 + .036 * Math.sin(x * 11 + z * 7);
+    const broad = .48 + .17 * Math.sin(x * .095 + z * .142) + .12 * Math.sin(z * .23 - x * .175) +
+      .10 * Math.sin(x * .49 + z * .71 + Math.cos(z * .61 - x * .42)) +
+      .07 * Math.cos(x * .94 + z * 1.23);
+    const grain = (rng() - .46) * .085 + .031 * Math.sin(x * 11 + z * 7);
     const color = palette.fern.clone().lerp(palette.grass, smooth(.01, .68, broad))
       .lerp(palette.straw, smooth(.51, 1, broad) * .64);
     const path = laneDistance(x, z);
     const bank = Math.abs(x - riverCenter(z)) - riverWidth(z);
-    const bankColor = palette.gravel.clone().lerp(palette.sand, smooth(-2, 1.6, bank));
-    color.lerp(bankColor, smooth(2.7, .63, bank));
-    if (path < 1.9 && y > riverLevel(z) + .01) {
-      const width = x < -13 && z > -5 && z < 5 ? 1.65 : 1.12;
-      color.lerp(palette.pathShade.clone().lerp(palette.path, .68 + grain),
-        smooth(width + .33, width - .42, path + grain * 3));
-    }
+    const shore = smooth(2.65, .53, bank + Math.sin(z * 2.5 + x * .6) * .18);
+    const bankColor = palette.gravel.clone().lerp(palette.sand, smooth(-2, 1.5, bank));
+    color.lerp(bankColor, shore);
+    const width = x < -13 && z > -5 && z < 5 ? 1.59 : 1.06;
+    const treadDistance = path + grain * 2.3 + .12 * Math.sin(z * 2.3 - x * 1.8);
+    const wear = smooth(width + .27, width - .33, treadDistance) * smooth(.01, .12, y - riverLevel(z));
+    color.lerp(palette.pathShade.clone().lerp(palette.path, .61 + broad * .36), wear);
+    let earth = Math.max(shore * .90, wear);
+    let rocky = shore * smooth(.8, -.40, bank);
     for (const [px, pz, rx, rz] of paddies) {
       if (Math.abs(x - px) > rx + 1 || Math.abs(z - pz) > rz + 1) continue;
       const r = paddyShape(x - px, z - pz, rx, rz);
-      color.lerp(palette.mud, smooth(1.10, .76, r));
+      const basin = smooth(1.12, .77, r);
+      color.lerp(palette.mud, basin);
+      earth = Math.max(earth, basin);
       color.lerp(palette.grass, smooth(.9, 1.02, r) * smooth(1.18, 1.06, r) * .5);
     }
     const courtyard = Math.hypot((x + 18) * .86, (z + 46.5) * 1.10);
-    color.lerp(palette.courtyard, smooth(5.2, 4.5, courtyard));
+    const court = smooth(5.5, 4.2, courtyard);
+    color.lerp(palette.courtyard, court);
+    earth = Math.max(earth, court);
+    rocky = Math.max(rocky, court * .65);
     color.multiplyScalar(1 + grain);
-    return [x, y, z, color];
-  }, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .96 }));
+    return [x, y, z, color, [earth, rocky, rocky * .23]];
+  }, groundMaterial(detail, { roughness: .96 }));
   turf.receiveShadow = true;
   turf.name = 'Sculpted river valley and earth terraces';
   scene.add(turf);
 }
 
-export function addMountains(scene) {
+export function addMountains(scene, detail) {
   const ridges = [
     { z: -257, depth: 148, width: 340, offset: -13, height: 89, shift: 2.8, green: '#87a8bf', rock: '#adc2d3', shade: '#7399b5' },
     { z: -191, depth: 112, width: 270, offset: -20, height: 65, shift: 1.2, green: '#6e9397', rock: '#9baeb7', shade: '#557d8b' },
@@ -105,17 +116,19 @@ export function addMountains(scene) {
         .040 * Math.sin(u * 52 + shift) + .012 * Math.sin(u * 113);
       const strata = Math.sin((x + z * .52) * .56) * .5 + Math.sin((x - z * .16) * 1.10) * .5;
       const buttress = Math.sin(x * .18 + z * .072) * .55 + Math.cos(z * .23 - x * .37) * .36;
-      const y = -3.7 + height * Math.pow(slopes, 1.12) * spine *
-        (crest + buttress * .105 + strata * .022);
+      const base = groundAt(x, z);
+      const y = -11 + height * Math.pow(slopes, 1.19) * spine *
+        (crest + buttress * .128 + strata * .05);
+      const join = layer === 2 ? smooth(-.6, 8, y - base) : 1;
       const exposure = smooth(15, 42, y) * smooth(-.55, .64, buttress + strata * .46) +
         .33 * smooth(.35, 1.1, buttress + strata) * smooth(7, 23, y);
       const light = .42 + .26 * Math.sin(x * .075 + z * .1) + .14 * Math.sin(y * .45 + x * .29);
-      const color = shadow.clone().lerp(needles, light + .24).lerp(cliff, Math.min(.89, exposure));
-      color.multiplyScalar(1 + .071 * strata);
-      return [x, y, z, color];
-    }, new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 1, emissive: shade, emissiveIntensity: layer === 0 ? .16 : .10
-    }));
+      const foothill = new THREE.Color('#657951').lerp(needles, .59 + strata * .16);
+      const massif = shadow.clone().lerp(needles, light + .24).lerp(cliff, Math.min(.89, exposure));
+      const color = foothill.lerp(massif, join);
+      color.multiplyScalar(1 + .078 * strata);
+      return [x, y, z, color, [exposure * .8, exposure, .68 + exposure * .25]];
+    }, groundMaterial(detail, { roughness: 1, emissive: shade, emissiveIntensity: layer === 0 ? .13 : .07 }));
     mesh.name = ['Far blue ridgeline', 'Middle forest ridgeline', 'Mountainside with exposed rock ribs'][layer];
     scene.add(mesh);
   });
@@ -212,7 +225,8 @@ export function addWater(scene) {
       ${noiseGLSL}
       void main() {
         float z = wPos.z, x = wPos.x, t = clock;
-        float center = 2.7*sin((z-1.)*.092) + .65*sin((z-1.)*.24);
+        float center = 2.7*sin((z-1.)*.092) + .65*sin((z-1.)*.24)
+          + 24. * (1. - smoothstep(-110.,-65.,z));
         float width = 5.65 + .42*sin((z-1.)*.14) + .22*sin((z-1.)*.32);
         float edge = abs(x-center) / width;
         vec2 uv = vec2(x, z - t * .42);
@@ -222,12 +236,18 @@ export function addWater(scene) {
           .33 * sin(z * 4.2 + x * 1.37 - t * 1.9 + wide * 8.);
         float vein = noise(vec2(x * 1.8 - z * .10 + wide * 1.4, (z - t * .58) * 4.1));
         float littoral = smoothstep(.47,1.07,edge) * (1. - isPaddy);
-        vec3 body = mix(deep, shallow, .05 + littoral * .61 + wide * .21);
+        vec3 body = mix(deep, shallow, .045 + littoral * .65 + wide * .16);
+        float shoal = 1. - smoothstep(.03,.27,1. - edge);
+        float sediments = noise(vec2(x*1.9, z*1.3)) * .64 + noise(vec2(x*.5,z*.71)) * .36;
+        vec3 bed = mix(vec3(.115,.118,.073), vec3(.339,.345,.213), sediments);
+        body = mix(body, bed, shoal * .56 * (1. - isPaddy));
         vec3 view = normalize(cameraPosition - wPos);
         vec3 norm = normalize(vec3(.026 * wind, 1., .041 * wind + .05 * (vein-.5)));
         float fresnel = pow(1. - max(dot(view, norm),0.),3.);
-        float reflectedClouds = noise(vec2(x*.18, z*.27)) * .25;
-        body = mix(body, reflection, min(.69, .09 + fresnel*.54 + reflectedClouds * fresnel));
+        float reflectedClouds = noise(vec2(x*.16, z*.22) + norm.xz * 22.) * .24;
+        float reflectedBanks = smoothstep(.35,.97,edge) * noise(vec2(z*.37,x*.46) + norm.xz*16.);
+        vec3 reflected = mix(reflection, vec3(.16,.27,.22), reflectedBanks * .82 * (1. - isPaddy));
+        body = mix(body, reflected, min(.73, .08 + fresnel*.57 + reflectedClouds * fresnel));
         float streak = smoothstep(.82,.97,vein + .045 * wind) * smoothstep(.35,.86,wide);
         float foam = smoothstep(.92,1.03,edge) * smoothstep(.60,.80,vein) * (1. - isPaddy);
         float glint = pow(max(0.,dot(reflect(-sun,norm),view)),110.) * (.26 + wide * .58);
