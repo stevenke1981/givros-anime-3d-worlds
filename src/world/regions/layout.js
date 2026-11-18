@@ -52,9 +52,24 @@ export function createRegionalLayout(id) {
     return Math.abs(x - centerAt(z)) - spanAt(z);
   }
 
+  function lakeScale(angle) {
+    // Preserve the dock and built southern shoreline. The undeveloped far shore
+    // has a broad headland and a smaller reed cove.
+    const inland = smooth(.10,.93,Math.cos(angle)*.37-Math.sin(angle)*.82+.42);
+    return 1 + inland * (.152*Math.sin(3*angle+.34)+.083*Math.cos(5*angle+1.12)-.067*Math.sin(2*angle+.63));
+  }
+
+  function lakeBoundary(angle,scale=1) {
+    const stretch=scale*lakeScale(angle);
+    return [lake.x+Math.cos(angle)*lake.rx*stretch,lake.z+Math.sin(angle)*lake.rz*stretch];
+  }
+
   function seaEdge(x, z) {
     if (coast) return coast.z + coast.bend * (Math.sin(x * .077) * .43 + Math.sin((x - 13) * .157) * .26) - z;
-    if (lake) return (Math.hypot((x - lake.x) / lake.rx, (z - lake.z) / lake.rz) - 1) * 23;
+    if (lake) {
+      const dx=(x-lake.x)/lake.rx,dz=(z-lake.z)/lake.rz;
+      return (Math.hypot(dx,dz)-lakeScale(Math.atan2(dz,dx)))*23;
+    }
     return 100;
   }
 
@@ -74,7 +89,7 @@ export function createRegionalLayout(id) {
     const riverbed = mix(water - (radius > 3 ? 1.43 : .80), foothill, smooth(-2.8,2.1,edge));
     const coastal = (coast ?? lake)?.level ?? -.4;
     return mix(coastal - 7 * smooth(0,-32,shore), riverbed,
-      smooth(-1.25,3,shore));
+      smooth(-1.25,lake?11.8:3,shore));
   }
 
   function landscaped(x,z) {
@@ -220,6 +235,6 @@ export function createRegionalLayout(id) {
     stairs: {...stair,count,depth:stairDepth,yAt:stairY},
     landmarks: [featured,at('lookout',spec.overlook.position[0],spec.overlook.position[2]),
       at('gate',...spec.gate),at('crossing',bridge.x,bridge.z)],
-    baseWaterAt, centerAt, spanAt, riverEdge, seaEdge, waterAt, routeBlend, groundAt, surfaceAt, canWalk
+    baseWaterAt, centerAt, spanAt, riverEdge, seaEdge, lakeBoundary, waterAt, routeBlend, groundAt, surfaceAt, canWalk
   };
 }
