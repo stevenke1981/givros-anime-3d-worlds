@@ -51,6 +51,8 @@ export function groundMaterial(detail, options = {}) {
     roughness: .93,
     ...options
   });
+  // Custom shader uniforms are outside MeshStandardMaterial's texture fields.
+  material.userData.ownedTextures = [detail];
   material.onBeforeCompile = shader => {
     shader.uniforms.landDetail = { value: detail };
     shader.vertexShader = `

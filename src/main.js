@@ -1,8 +1,9 @@
 import {
   MathUtils, NeutralToneMapping, PCFShadowMap, PerspectiveCamera, WebGLRenderer,
 } from 'three';
-import { createBlossomDetail } from './detail/blossom-splats.js';
-import { createSakuraWorld } from './world/sakura.js';
+import { createGaussianDetail } from './detail/gaussian-detail.js';
+import { scenes } from './world/catalog.js';
+import { disposeScene } from './world/dispose-scene.js';
 import { advanceWalker, EYE_HEIGHT } from './walk.js';
 import './style.css';
 
@@ -16,13 +17,19 @@ const views = document.querySelector('.views');
 const welcome = document.querySelector('.welcome');
 const walking = document.querySelector('.walking');
 const help = document.querySelector('#help-dialog');
-const viewButtons = [...views.querySelectorAll('[data-view]')];
+const sceneDialog = document.querySelector('#scene-dialog');
+const sceneMenu = document.querySelector('#scene-menu');
+const defaultViewLabels = {
+  overview: '全景', bridge: '朱橋', village: '村落', fields: '水田',
+  shrine: '神社', forest: '竹徑', overlook: '山腰', landmark: '主景', waterfront: '水岸',
+};
 const walkingKeys = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
 ]);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const options = new URLSearchParams(location.search);
 const traceWalk = options.has('trace-walk');
+const traceSplats = options.has('trace-splats');
 const camera = new PerspectiveCamera(46, 1, 0.14, 700);
 camera.rotation.order = 'YXZ';
 
@@ -32,11 +39,17 @@ let drag;
 let renderer;
 let world;
 let failed = false;
-let updateBlossomDetail;
+let loading = false;
+let activeScene;
+let requestedScene;
+let lastSelected = scenes.find(({ id }) => id === options.get('scene')) ?? scenes[0];
+let updateDetail;
 let mode = 'scenic';
 let previousTime;
 let elapsed = 0;
 let needsDraw = true;
+let canvasWidth = 0;
+let canvasHeight = 0;
 
 function clearInput() {
   pressedKeys.clear();
@@ -45,7 +58,7 @@ function clearInput() {
 }
 
 function resize() {
-  const width = canvas.clientWidth;
+  const width = Math.max(canvas.clientWidth, 1);
   const height = Math.max(canvas.clientHeight, 1);
   camera.aspect = width / height;
 
@@ -54,7 +67,11 @@ function resize() {
   camera.fov = Math.min(83, MathUtils.radToDeg(2
     * Math.atan(Math.tan(MathUtils.degToRad(baseFov / 2)) * fit)));
   camera.updateProjectionMatrix();
-  renderer.setSize(width, height, false);
+  if (width !== canvasWidth || height !== canvasHeight) {
+    canvasWidth = width;
+    canvasHeight = height;
+    renderer.setSize(width, height, false);
+  }
   needsDraw = true;
 }
 
@@ -77,20 +94,18 @@ function showView(id, restoreFocus = false) {
   if (!world || failed || !world.views[id]) return;
   pointCamera(world.views[id]);
   setMode('scenic');
-  for (const button of viewButtons) {
+  for (const button of views.querySelectorAll('button')) {
     button.setAttribute('aria-pressed', String(button.dataset.view === id));
   }
-  place.textContent = id === 'overview'
-    ? '山村全景'
-    : viewButtons.find((button) => button.dataset.view === id).textContent;
+  place.textContent = world.viewLabels?.[id] ?? defaultViewLabels[id];
   if (restoreFocus) start.focus();
 }
 
 function startWalk() {
-  if (!world || failed) return;
+  if (!world || failed || explorer.dataset.state !== 'ready') return;
   pointCamera(world.spawn);
   setMode('walk');
-  place.textContent = '山村散步';
+  place.textContent = '散步中';
   recordWalkPosition();
   canvas.focus({ preventScroll: true });
 }
@@ -132,14 +147,15 @@ function moveCamera(delta) {
 function drawFrame(time) {
   const delta = Math.min((time - (previousTime ?? time)) / 1000, 0.05);
   previousTime = time;
-  if (mode === 'walk' && !help.open && moveCamera(delta)) needsDraw = true;
+  if (!world || explorer.dataset.state !== 'ready') return;
+  if (mode === 'walk' && !help.open && !sceneDialog.open && moveCamera(delta)) needsDraw = true;
   if (!reducedMotion.matches) {
     elapsed += delta;
     needsDraw = true;
   }
   if (!needsDraw) return;
   world.update(elapsed, delta, reducedMotion.matches);
-  updateBlossomDetail?.(camera);
+  updateDetail?.(camera);
   renderer.render(world.scene, camera);
   needsDraw = false;
 }
@@ -149,6 +165,7 @@ function showFailure(message) {
   failed = true;
   clearInput();
   renderer?.setAnimationLoop(null);
+  sceneMenu.disabled = true;
   explorer.dataset.state = 'error';
   notice.hidden = false;
   notice.textContent = message;
@@ -162,14 +179,134 @@ document.querySelector('#help').addEventListener('click', () => {
   clearInput();
   help.showModal();
 });
-retry.addEventListener('click', () => location.reload());
+sceneMenu.addEventListener('click', () => {
+  clearInput();
+  sceneDialog.showModal();
+});
+retry.addEventListener('click', () => {
+  if (failed) location.reload();
+  else selectScene(lastSelected);
+});
 
-for (const button of viewButtons) {
-  button.addEventListener('click', () => showView(button.dataset.view));
+const sceneButtons = new Map(scenes.map((descriptor) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.sceneChoice = descriptor.id;
+  const name = document.createElement('strong');
+  const description = document.createElement('span');
+  name.textContent = descriptor.name;
+  description.textContent = descriptor.description;
+  button.append(name, description);
+  button.addEventListener('click', () => {
+    sceneDialog.close();
+    selectScene(descriptor);
+  });
+  return [descriptor, button];
+}));
+document.querySelector('#scene-options').append(...sceneButtons.values());
+
+function selectScene(descriptor) {
+  if (failed || (descriptor === activeScene && explorer.dataset.state === 'ready')) return;
+  lastSelected = descriptor;
+  requestedScene = descriptor;
+  setMode('scenic');
+  explorer.dataset.state = 'loading';
+  start.disabled = true;
+  retry.hidden = true;
+  notice.hidden = false;
+  notice.textContent = '正在載入「' + descriptor.name + '」…';
+  if (!loading) loadRequestedScenes();
+}
+
+async function loadRequestedScenes() {
+  loading = true;
+  while (requestedScene && !failed) {
+    const descriptor = requestedScene;
+    requestedScene = undefined;
+    let next;
+    let reportProgress = true;
+    try {
+      if (descriptor === activeScene) {
+        explorer.dataset.state = 'ready';
+        notice.hidden = true;
+        start.disabled = false;
+        showView('overview');
+        continue;
+      }
+      const module = descriptor.id === '01'
+        ? await import('./world/sakura.js')
+        : await import('./world/regions/index.js');
+      if (requestedScene || failed) continue;
+      const progress = (_fraction, message) => {
+        if (reportProgress && !requestedScene && !failed && message) notice.textContent = descriptor.name + ' · ' + message;
+      };
+      next = descriptor.id === '01'
+        ? await module.createSakuraWorld({ renderer, onProgress: progress })
+        : await module.createRegionalWorld(descriptor.id, { renderer, onProgress: progress });
+      if (requestedScene || failed) {
+        disposeScene(next.scene);
+        continue;
+      }
+
+      const detail = options.get('splats') === 'off' ? undefined : createGaussianDetail(next.scene, {
+        detailScale: matchMedia('(any-pointer: coarse)').matches ? 0.56 : 1,
+        report: traceSplats ? (counts) => { canvas.dataset.gaussianCounts = JSON.stringify(counts); } : undefined,
+      });
+      pointCamera(next.views.overview);
+      next.update(0, 0, reducedMotion.matches);
+      detail?.(camera);
+      renderer.shadowMap.needsUpdate = true;
+      renderer.render(next.scene, camera);
+
+      if (world) {
+        disposeScene(world.scene);
+        renderer.renderLists.dispose();
+      }
+      world = next;
+      activeScene = descriptor;
+      updateDetail = detail;
+      elapsed = 0;
+      explorer.dataset.scene = descriptor.id;
+      explorer.dataset.state = 'ready';
+      canvas.setAttribute('aria-label', descriptor.name + '即時 3D 場景');
+      document.title = descriptor.name + '｜十景漫步';
+      document.querySelector('#scene-name').textContent = descriptor.name;
+      document.querySelector('#scene-description').textContent = descriptor.description;
+      for (const [entry, button] of sceneButtons) {
+        if (entry === activeScene) button.setAttribute('aria-current', 'true');
+        else button.removeAttribute('aria-current');
+      }
+      views.replaceChildren(...Object.keys(world.views).map((id) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.view = id;
+        button.textContent = world.viewLabels?.[id] ?? defaultViewLabels[id] ?? id;
+        button.addEventListener('click', () => showView(id));
+        return button;
+      }));
+      showView('overview');
+      notice.hidden = true;
+      start.disabled = false;
+
+      const url = new URL(location.href);
+      url.searchParams.set('scene', descriptor.id);
+      history.replaceState(null, '', url);
+    } catch (error) {
+      if (next && next !== world) disposeScene(next.scene);
+      if (requestedScene || failed) continue;
+      console.error(error);
+      explorer.dataset.state = 'error';
+      notice.textContent = '無法載入「' + descriptor.name + '」。請重試或選擇其他場景。';
+      retry.hidden = false;
+    } finally {
+      reportProgress = false;
+    }
+  }
+  loading = false;
 }
 
 window.addEventListener('keydown', (event) => {
-  if (mode !== 'walk' || help.open || failed || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (mode !== 'walk' || help.open || sceneDialog.open || failed || event.altKey || event.ctrlKey || event.metaKey) return;
   if (event.code === 'Escape') {
     event.preventDefault();
     showView('overview', true);
@@ -216,7 +353,7 @@ for (const button of document.querySelectorAll('[data-hold]')) {
   button.addEventListener('lostpointercapture', (event) => touchKeys.delete(event.pointerId));
 }
 
-async function load() {
+function boot() {
   try {
     renderer = new WebGLRenderer({ canvas, antialias: true });
   } catch (error) {
@@ -231,34 +368,11 @@ async function load() {
   renderer.shadowMap.type = PCFShadowMap;
   renderer.shadowMap.autoUpdate = false;
   canvas.addEventListener('webglcontextlost', () => {
-    showFailure('3D 繪圖已中斷，請重新載入山村。');
+    showFailure('3D 繪圖已中斷，請重新載入頁面。');
   });
-
-  try {
-    world = await createSakuraWorld({ renderer });
-    if (failed) return;
-    if (options.get('splats') !== 'off') {
-      updateBlossomDetail = createBlossomDetail(world.scene);
-    }
-    for (const button of viewButtons) {
-      const available = Boolean(world.views[button.dataset.view]);
-      button.hidden = !available;
-      button.disabled = !available;
-    }
-    showView('overview');
-    world.update(0, 0, reducedMotion.matches);
-    updateBlossomDetail?.(camera);
-    renderer.shadowMap.needsUpdate = true;
-    renderer.render(world.scene, camera);
-    start.disabled = false;
-    explorer.dataset.state = 'ready';
-    notice.hidden = true;
-    new ResizeObserver(resize).observe(canvas);
-    renderer.setAnimationLoop(drawFrame);
-  } catch (error) {
-    console.error(error);
-    showFailure('山村載入失敗。請重新載入，或確認伺服器能提供模型檔案。');
-  }
+  new ResizeObserver(resize).observe(canvas);
+  renderer.setAnimationLoop(drawFrame);
+  selectScene(lastSelected);
 }
 
-load();
+boot();
