@@ -7,7 +7,7 @@ import {
 import { addMountains, addSky, addTerrain, addWater, randomSequence, sunDirection } from './landscape.js';
 
 const assetNames = [
-  'house', 'bridge', 'torii', 'shrine', 'sakura', 'cedar',
+  'house', 'bridge', 'torii', 'shrine', 'sakura', 'cedar', 'cedar-lod',
   'stone-lantern', 'rock', 'bamboo', 'rice', 'fence', 'stair-tread'
 ];
 
@@ -84,7 +84,7 @@ function populate(scene, assets) {
 
   const cedarNear = [], cedarFar = [], bamboo = [], rock = [], rice = [], fences = [], lanterns = [];
   const treeTints = ['#eff2e4','#d6e5de','#dce9bc','#e9edcd','#f4f3d8','#c5d8cc'];
-  for (let i = 0; i < 1070; i++) {
+  for (let i = 0; i < 982; i++) {
     const x = mix(-58, 57, rand()), z = mix(-67, 38, rand());
     const woodland = z < -32 || x < -39 || x > 44 || (z > 18 && x < 7) || (z > 31 && x > 28);
     const patch = Math.sin(x * .27 - z * .16) + Math.cos(x * .13 + z * .40);
@@ -165,7 +165,22 @@ function populate(scene, assets) {
       groves.get(cell).push(tree);
     }
     for (const trees of groves.values()) {
-      batchAsset(scene, assets.cedar, trees, { castShadow: shadow, receiveShadow: shadow });
+      if (!shadow) {
+        batchAsset(scene, assets['cedar-lod'], trees, { castShadow: false, receiveShadow: false });
+        continue;
+      }
+      const centerX = trees.reduce((sum, tree) => sum + tree[0], 0) / trees.length;
+      const centerZ = trees.reduce((sum, tree) => sum + tree[2], 0) / trees.length;
+      const grove = new THREE.LOD();
+      grove.name = 'Cedar grove LOD';
+      grove.position.set(centerX, groundAt(centerX, centerZ), centerZ);
+      for (const [model, distance] of [['cedar', 0], ['cedar-lod', 33]]) {
+        const level = new THREE.Group();
+        level.position.copy(grove.position).negate();
+        batchAsset(level, assets[model], trees);
+        grove.addLevel(level, distance, .12);
+      }
+      scene.add(grove);
     }
   }
   batchAsset(scene, assets.bamboo, bamboo);
@@ -265,9 +280,9 @@ export async function createSakuraWorld({ renderer, onProgress = () => {} } = {}
 
   const standing = (x, z, target) => ({ position: [x, surfaceY(x,z) + 1.65, z], target });
   const views = {
-    overview: { position: [36,22,37], target: [-6,7,-16] },
+    overview: { position: [36,22,37], target: [-7,9.8,-16] },
     bridge: standing(10.55,5.6,[-7.2,3.2,-.40]),
-    shrine: standing(-18,-42.0,[-18,9.5,-47]),
+    shrine: standing(-18,-35.25,[-18,9.85,-47]),
     fields: standing(35.2,-12.02,[15.0,.8,-6.0]),
     overlook: standing(-41,-50,[-14,6.5,-18]),
     village: standing(-14,0,[-27,2,-6]),
