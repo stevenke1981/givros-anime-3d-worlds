@@ -230,7 +230,7 @@ async function loadRequestedScenes() {
         explorer.dataset.state = 'ready';
         notice.hidden = true;
         start.disabled = false;
-        showView('overview');
+        showView(world.initialView ?? 'overview');
         continue;
       }
       const module = descriptor.id === '01'
@@ -252,7 +252,8 @@ async function loadRequestedScenes() {
         detailScale: matchMedia('(any-pointer: coarse)').matches ? 0.56 : 1,
         report: traceSplats ? (counts) => { canvas.dataset.gaussianCounts = JSON.stringify(counts); } : undefined,
       });
-      pointCamera(next.views.overview);
+      const firstView = next.initialView ?? 'overview';
+      pointCamera(next.views[firstView]);
       next.update(0, 0, reducedMotion.matches);
       detail?.(camera);
       renderer.shadowMap.needsUpdate = true;
@@ -284,7 +285,7 @@ async function loadRequestedScenes() {
         button.addEventListener('click', () => showView(id));
         return button;
       }));
-      showView('overview');
+      showView(firstView);
       notice.hidden = true;
       start.disabled = false;
 

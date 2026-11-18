@@ -44,7 +44,11 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
     expect(response.ok()).toBe(true);
     expect(new URL(response.url()).pathname).toMatch(/^\/sakura\/models\//);
   }
-  const initial = await page.screenshot({ path: info.outputPath('overview.png') });
+  for (const asset of ['meadow-grass', 'wild-azalea', 'valley-broadleaf']) {
+    expect(modelResponses.some((response) => new URL(response.url()).pathname.endsWith('/' + asset + '.glb'))).toBe(true);
+  }
+  await expect(page.getByRole('button', { name: '溪岸步道' })).toHaveAttribute('aria-pressed', 'true');
+  const initial = await page.screenshot({ path: info.outputPath('meadow.png') });
 
   const shrine = page.getByRole('button', { name: '神社', exact: true });
   await shrine.click();
@@ -98,6 +102,8 @@ test('a touch viewport exposes walking controls and keeps navigation usable', as
     await page.goto(new URL('./', info.project.use.baseURL).href);
     const explorer = page.locator('#explorer');
     await expect(explorer).toHaveAttribute('data-state', 'ready', { timeout: 45_000 });
+    const allViewsFit = await page.locator('.views').evaluate((nav) => nav.scrollWidth <= nav.clientWidth);
+    expect(allViewsFit).toBe(true);
     await page.screenshot({ path: info.outputPath('mobile.png') });
     await page.getByRole('button', { name: '開始散步' }).tap();
     await expect(page.getByRole('button', { name: '向前' })).toBeVisible();

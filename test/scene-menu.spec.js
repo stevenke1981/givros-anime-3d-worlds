@@ -32,6 +32,7 @@ test('the release menu opens every world and each entrance supports walking', as
     await expect(explorer).toHaveAttribute('data-scene', scene.id, { timeout: 70_000 });
     await expect(explorer).toHaveAttribute('data-mode', 'scenic');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(scene.name);
+    if (scene.id === '01') await page.locator('[data-view="overview"]').click();
     await page.screenshot({ path: info.outputPath(scene.id + '-overview.png') });
 
     const landmark = scene.id === '01' ? 'shrine' : 'landmark';

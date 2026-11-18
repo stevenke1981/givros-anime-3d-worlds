@@ -211,7 +211,8 @@ export function addWater(scene) {
       deep: { value: new THREE.Color('#117488') },
       shallow: { value: new THREE.Color('#64c9bb') },
       reflection: { value: new THREE.Color('#abd9e9') },
-      isPaddy: { value: 0 }
+      isPaddy: { value: 0 },
+      basinBounds: { value: new THREE.Vector4(0, 0, 0, 0) }
     },
     vertexShader: `
       varying vec3 wPos;
@@ -223,6 +224,7 @@ export function addWater(scene) {
     fragmentShader: `
       uniform float clock, isPaddy;
       uniform vec3 sun, deep, shallow, reflection;
+      uniform vec4 basinBounds;
       varying vec3 wPos;
       ${noiseGLSL}
       void main() {
@@ -254,6 +256,19 @@ export function addWater(scene) {
         float foam = smoothstep(.92,1.03,edge) * smoothstep(.60,.80,vein) * (1. - isPaddy);
         float glint = pow(max(0.,dot(reflect(-sun,norm),view)),110.) * (.26 + wide * .58);
         body += vec3(.18,.24,.23) * (streak * .40 + foam * .43) + vec3(.40,.37,.27)*glint;
+        if (basinBounds.z > 0.) {
+          vec2 local = abs((wPos.xz - basinBounds.xy) / basinBounds.zw);
+          float radius = pow(pow(local.x, 3.5) + pow(local.y, 3.5), 1. / 3.5);
+          float shelf = smoothstep(.70,.97,radius + .05 * (sediments - .5));
+          vec3 muddyBed = mix(deep, shallow, clamp(.33 * sediments + .59 * shelf, 0., 1.));
+          vec3 reflectedRay = reflect(-view, norm);
+          float skyBand = smoothstep(.02,.32,reflectedRay.y);
+          float reflectedHaze = smoothstep(.30,.78,noise(reflectedRay.xz * 2.2 + wPos.xz * .18));
+          vec3 stillSky = mix(vec3(.10,.16,.115), reflection, skyBand);
+          stillSky = mix(stillSky, vec3(.67,.76,.81), reflectedHaze * skyBand * .33);
+          body = mix(muddyBed, stillSky, (.25 + fresnel * .63) * (1. - shelf * .52));
+          body += vec3(.12,.15,.14) * (streak * .23 + glint);
+        }
         gl_FragColor = vec4(body,1.);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -272,11 +287,16 @@ export function addWater(scene) {
   paddyMaterial.uniforms.deep.value = new THREE.Color('#8e9e68');
   paddyMaterial.uniforms.shallow.value = new THREE.Color('#b8ba76');
   for (const [px, pz, rx, rz, level] of paddies) {
+    const basinMaterial = paddyMaterial.clone();
+    basinMaterial.uniforms.clock = clock;
+    basinMaterial.uniforms.basinBounds.value.set(px, pz, rx, rz);
+    basinMaterial.uniforms.deep.value.set('#71694b');
+    basinMaterial.uniforms.shallow.value.set('#8f835b');
     const basin = landscapeMesh(20, 20, (u, v) => {
       const x = (u * 2 - 1), z = (v * 2 - 1);
       const scale = Math.max(Math.abs(x), Math.abs(z)) / Math.max(paddyShape(x, z, 1, 1), .0001);
       return [px + x * scale * rx * .96, level, pz + z * scale * rz * .96];
-    }, paddyMaterial);
+    }, basinMaterial);
     basin.name = 'Flooded rice terrace';
     scene.add(basin);
   }
