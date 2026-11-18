@@ -6,10 +6,12 @@ import {
 } from './layout.js';
 import { addMountains, addSky, addTerrain, addWater, randomSequence, sunDirection } from './landscape.js';
 import { createGroundDetail } from './ground-material.js';
+import { plantUnderstory } from './understory.js';
 
 const assetNames = [
   'house', 'bridge', 'torii', 'shrine', 'sakura', 'cedar', 'cedar-lod',
-  'stone-lantern', 'rock', 'bamboo', 'rice', 'fence', 'stair-tread'
+  'stone-lantern', 'rock', 'bamboo', 'rice', 'fence', 'stair-tread', 'stair-tread-b', 'stair-tread-c',
+  'grass', 'river-sedge'
 ];
 
 async function loadAssets(onProgress) {
@@ -66,11 +68,18 @@ function populate(scene, assets) {
   batchAsset(scene, assets.torii, [[torii.x, groundAt(torii.x, torii.z), torii.z, 0, 1]]);
 
   const stairDepth = (steps.start - steps.end) / steps.count;
-  batchAsset(scene, assets['stair-tread'], Array.from({ length: steps.count }, (_, i) => {
+  const treadAssets = ['stair-tread', 'stair-tread-b', 'stair-tread-c'];
+  const stairPlacements = treadAssets.map(() => []);
+  for (let i = 0; i < steps.count; i++) {
     const z = steps.start - (i + .5) * stairDepth;
-    return [steps.x, stairHeight(z), z, 0, 1, 1, stairDepth / .38 + .025,
-      new THREE.Color().setScalar(.81 + rand() * .19)];
-  }), { castShadow: false });
+    stairPlacements[(i + Math.floor(i / 5)) % treadAssets.length].push([
+      steps.x, stairHeight(z), z, 0, 1, 1, stairDepth / .38 + .025,
+      new THREE.Color().setScalar(.86 + rand() * .14)
+    ]);
+  }
+  for (const [i, name] of treadAssets.entries()) {
+    batchAsset(scene, assets[name], stairPlacements[i], { castShadow: false });
+  }
 
   const blossomSites = [
     [-8.8, 4.6, 1.32], [-13.8, 12.9, .85], [-24.9, 14, .75],
@@ -190,6 +199,17 @@ function populate(scene, assets) {
   batchAsset(scene, assets.fence, fences);
   batchAsset(scene, assets['stone-lantern'], lanterns);
 
+  const { grass, sedge } = plantUnderstory();
+  for (const [species, plants] of [['grass', grass], ['river-sedge', sedge]]) {
+    const clusters = new Map();
+    for (const plant of plants) {
+      const cell = `${Math.floor(plant[0] / 24)},${Math.floor(plant[2] / 24)}`;
+      if (!clusters.has(cell)) clusters.set(cell, []);
+      clusters.get(cell).push(plant);
+    }
+    for (const patch of clusters.values()) batchAsset(scene, assets[species], patch, { castShadow: false });
+  }
+
   // Complete the distant bank with small trees below the exposed ridgeline.
   const farBank = [], ridgeRand = randomSequence(27835);
   for (let i = 0; i < 148; i++) {
@@ -294,7 +314,7 @@ export async function createSakuraWorld({ renderer, onProgress = () => {} } = {}
   const views = {
     overview: { position: [36,22,37], target: [-7,9.8,-16] },
     bridge: standing(10.55,5.6,[-7.2,3.2,-.40]),
-    shrine: standing(-18,-35.25,[-18,9.85,-47]),
+    shrine: standing(-21.8,-36.10,[-17.85,9.42,-46.15]),
     fields: standing(35.2,-12.02,[15.0,.8,-6.0]),
     overlook: standing(-41,-50,[-14,6.5,-18]),
     village: standing(-14,0,[-27,2,-6]),
