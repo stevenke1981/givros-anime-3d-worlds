@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#182d28">
+    <meta name="description" content="走過朱橋，沿溪谷田埂與竹徑探訪山腰神社。">
+    <title>春櫻山村</title>
+  </head>
+  <body>
+    <main id="explorer" data-mode="scenic" data-state="loading">
+      <canvas id="world" aria-label="春櫻山村即時 3D 場景" tabindex="-1"></canvas>
+      <header class="identity">
+        <h1>春櫻山村</h1>
+        <p id="place">山村全景</p>
+      </header>
+
+      <button class="help-button" id="help" type="button" aria-haspopup="dialog">操作說明</button>
+
+      <div id="notice" class="notice" role="status">正在載入山村…</div>
+      <noscript><p class="notice">請開啟 JavaScript 後重新整理網頁。</p></noscript>
+      <button class="retry" id="retry" type="button" hidden>重新載入</button>
+
+      <section class="welcome" aria-label="探索山村">
+        <p>走過朱橋，沿田埂和竹徑去山腰的神社。</p>
+        <button id="start" class="primary" type="button" disabled>開始散步 <span aria-hidden="true">↗</span></button>
+      </section>
+
+      <nav class="views" aria-label="觀景位置">
+        <button type="button" data-view="overview" aria-pressed="true" disabled>全景</button>
+        <button type="button" data-view="bridge" aria-pressed="false" disabled>朱橋</button>
+        <button type="button" data-view="village" aria-pressed="false" disabled hidden>村落</button>
+        <button type="button" data-view="fields" aria-pressed="false" disabled hidden>水田</button>
+        <button type="button" data-view="shrine" aria-pressed="false" disabled>神社</button>
+        <button type="button" data-view="forest" aria-pressed="false" disabled hidden>竹徑</button>
+        <button type="button" data-view="overlook" aria-pressed="false" disabled hidden>山腰</button>
+      </nav>
+
+      <section class="walking" aria-label="散步控制" hidden>
+        <p class="walk-hint">WASD 移動 · 拖曳環顧 · Esc 回全景</p>
+        <div class="touch-pad" aria-label="觸控移動">
+          <button type="button" data-hold="KeyW" aria-label="向前">↑</button>
+          <button type="button" data-hold="KeyA" aria-label="向左">←</button>
+          <button type="button" data-hold="KeyS" aria-label="向後">↓</button>
+          <button type="button" data-hold="KeyD" aria-label="向右">→</button>
+        </div>
+        <div class="walk-actions">
+          <button type="button" id="reset">回入口</button>
+          <button type="button" id="stop">回全景</button>
+        </div>
+      </section>
+
+      <dialog id="help-dialog" aria-labelledby="help-title">
+        <form method="dialog" class="dialog-heading">
+          <h2 id="help-title">操作說明</h2>
+          <button type="submit" autofocus>關閉</button>
+        </form>
+        <dl>
+          <dt>電腦</dt>
+          <dd>用 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 或上下方向鍵移動。拖曳畫面或按左右方向鍵轉身。</dd>
+          <dt>手機與平板</dt>
+          <dd>按住方向按鈕移動，拖曳畫面環顧。</dd>
+          <dt>想換個角度</dt>
+          <dd>選擇下方的景點。散步時按 <kbd>Esc</kbd> 可回全景，也可隨時回入口。</dd>
+        </dl>
+      </dialog>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
