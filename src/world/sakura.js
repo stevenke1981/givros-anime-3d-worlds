@@ -5,6 +5,7 @@ import {
   riverCenter, riverWidth, shrine, stairHeight, steps, surfaceAt as surfaceY, torii
 } from './layout.js';
 import { addMountains, addSky, addTerrain, addWater, randomSequence, sunDirection } from './landscape.js';
+import { createGroundDetail } from './ground-material.js';
 
 const assetNames = [
   'house', 'bridge', 'torii', 'shrine', 'sakura', 'cedar', 'cedar-lod',
@@ -189,6 +190,16 @@ function populate(scene, assets) {
   batchAsset(scene, assets.fence, fences);
   batchAsset(scene, assets['stone-lantern'], lanterns);
 
+  // Complete the distant bank with small trees below the exposed ridgeline.
+  const farBank = [], ridgeRand = randomSequence(27835);
+  for (let i = 0; i < 148; i++) {
+    const z = mix(-103, -73, ridgeRand()), x = mix(-68, 74, ridgeRand());
+    if (Math.abs(x - riverCenter(z)) < 7.7 || Math.sin(x * .19 - z * .23) + Math.cos(x * .11 + z * .48) < .05) continue;
+    const s = mix(.43, .88, ridgeRand());
+    farBank.push([x, groundAt(x,z) - .27, z, ridgeRand() * Math.PI * 2, s, s, s, new THREE.Color('#c2d6c7')]);
+  }
+  batchAsset(scene, assets['cedar-lod'], farBank, { castShadow: false, receiveShadow: false });
+
   return { blossomSites, blocked };
 }
 
@@ -269,9 +280,10 @@ export async function createSakuraWorld({ renderer, onProgress = () => {} } = {}
   if (renderer?.shadowMap) renderer.shadowMap.enabled = true;
 
   onProgress(.69, '雕塑河谷與梯田');
+  const groundDetail = createGroundDetail();
   addSky(scene);
-  addMountains(scene);
-  addTerrain(scene);
+  addMountains(scene, groundDetail);
+  addTerrain(scene, groundDetail);
   const water = addWater(scene);
   onProgress(.87, '排列村墅、竹林與春櫻');
   const { blossomSites, blocked } = populate(scene, assets);

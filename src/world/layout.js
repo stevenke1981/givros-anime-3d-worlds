@@ -4,7 +4,8 @@ export const smooth = (low, high, value) => {
 };
 export const mix = (a, b, t) => a + (b - a) * t;
 export const bounds = { west: -48, east: 47, north: -56, south: 39 };
-export const riverCenter = z => 2.7 * Math.sin((z - 1) * .092) + .65 * Math.sin((z - 1) * .24);
+export const riverCenter = z => 2.7 * Math.sin((z - 1) * .092) + .65 * Math.sin((z - 1) * .24) +
+  24 * smooth(-65, -110, z);
 export const riverWidth = z => 5.65 + .42 * Math.sin((z - 1) * .14) + .22 * Math.sin((z - 1) * .32);
 export const riverLevel = z => -.36 - (z - 1) * .014;
 
@@ -61,7 +62,7 @@ function foothill(x, z) {
   const inland = smooth(5, 17, Math.abs(x - riverCenter(z)));
   const hillside = 11.4 * smooth(-21, -55, z) * inland;
   const southRise = 6.4 * smooth(8, 39, z) * smooth(9, 40, x);
-  const shoulders = (18 * smooth(54, 108, Math.abs(x)) + 13 * smooth(43, 122, z)) * inland;
+  const shoulders = (13 * smooth(54, 108, Math.abs(x)) + 11 * smooth(43, 122, z)) * inland;
   const outskirts = 2.7 * smooth(29, 49, Math.abs(x)) *
     (.6 + .4 * Math.sin(z * .11 - x * .08) ** 2);
   return .48 + riverLevel(z) + hillside + southRise + outskirts + shoulders +
