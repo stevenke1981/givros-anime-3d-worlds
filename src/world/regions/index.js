@@ -3,12 +3,19 @@ import { createRegionalLayout } from './layout.js';
 import { loadRegionalAssets, populateRegionalWorld } from './props.js';
 import { addAtmosphere, addTerrain, addHydrology, addSteam } from './terrain.js';
 
+const trailLabels = {
+  '02': '礫岸步道', '03': '竹林入口', '04': '田野入口',
+  '05': '楓葉山道', '06': '杉林古道', '07': '雪國小徑',
+  '08': '海岬小徑', '09': '湖畔山徑', '10': '祭典入口',
+};
+
 export async function createRegionalWorld(id, {renderer,onProgress=()=>{}}={}) {
   const layout=createRegionalLayout(id);
   const {spec,surfaceAt,canWalk}=layout;
   onProgress(.08,'準備地形');
   const assets=await loadRegionalAssets(layout,onProgress);
   const scene=new THREE.Scene();
+  if (spec.night) scene.userData.gaussianExposure=.47;
   if (renderer?.shadowMap) renderer.shadowMap.enabled=true;
   const sun=addAtmosphere(scene,layout);
   onProgress(.64,'生成河流、丘陵與步道');
@@ -20,8 +27,8 @@ export async function createRegionalWorld(id, {renderer,onProgress=()=>{}}={}) {
   steam(0,false);
   const [x,z]=spec.spawn;
   const spawn={position:[x,surfaceAt(x,z)+1.65,z],target:spec.look};
-  const views={overview:spec.overview,landmark:spec.featured,overlook:spec.overlook};
-  const viewLabels={overview:'地形全景',landmark:spec.landmarkLabel,overlook:'山腰遠望'};
+  const views={trail:spawn,overview:spec.overview,landmark:spec.featured,overlook:spec.overlook};
+  const viewLabels={trail:trailLabels[id],overview:'地形全景',landmark:spec.landmarkLabel,overlook:'山腰遠望'};
   if (spec.grove) {
     views.approach=spec.grove;
     viewLabels.approach='竹徑參道';
@@ -41,7 +48,7 @@ export async function createRegionalWorld(id, {renderer,onProgress=()=>{}}={}) {
   }
   onProgress(1,spec.title+'已就緒');
   return {
-    scene, spawn, views, viewLabels, landmarks:layout.landmarks, routes:layout.routes,
+    scene, spawn, views, viewLabels, initialView:'trail', landmarks:layout.landmarks, routes:layout.routes,
     surfaceAt, canWalk:(x,z)=>canWalk(x,z)&&!blocks(x,z),
     update(elapsed,_delta,reducedMotion) {
       clock.value=reducedMotion?0:elapsed;

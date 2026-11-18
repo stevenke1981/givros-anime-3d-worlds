@@ -23,6 +23,23 @@ CONTRACT = {
     "teahouse": ((9.31, 5.61, 7.35), 0.0, 26000),
     "water-basin": ((1.83, 1.26, 1.16), 0.0, 1400),
     "maple-lod": ((6.54, 7.30, 6.38), 0.0, 7000),
+    "woodland-fern": ((0.79, 0.53, 0.77), 0.0, 850),
+    "seasonal-forbs": ((0.45, 0.60, 0.37), 0.0, 500),
+    "shore-reeds": ((0.56, 1.13, 0.60), 0.0, 500),
+    "coastal-pine": ((5.20, 4.67, 4.57), 0.0, 8700),
+    "coastal-pine-lod": ((5.14, 4.68, 4.43), 0.0, 3800),
+    "ridge-cedar": ((4.66, 8.92, 4.22), 0.0, 15000),
+    "ridge-cedar-lod": ((4.46, 8.92, 4.10), 0.0, 4000),
+}
+
+BOTANY_PARTS = {
+    "woodland-fern": {"Fern Leaf pinnate fronds", "Fern rachises"},
+    "seasonal-forbs": {"Forb Flower petals", "Forb Leaf blades", "Forb golden seed disks", "Forb stems"},
+    "shore-reeds": {"Reed Leaf folded straps", "Reed culms", "Reed seed heads"},
+    "coastal-pine": {"Pine Leaf needle sprays", "Pine scaffold Branches", "Pine Trunk and exposed roots"},
+    "coastal-pine-lod": {"Pine Leaf needle sprays", "Pine scaffold Branches", "Pine Trunk and exposed roots"},
+    "ridge-cedar": {"Ridge Cedar Leaf pendant sprays", "Ridge Cedar Branch scaffolds", "Ridge Cedar Trunk and buttresses"},
+    "ridge-cedar-lod": {"Ridge Cedar Leaf pendant sprays", "Ridge Cedar Branch scaffolds", "Ridge Cedar Trunk and buttresses"},
 }
 
 
@@ -47,6 +64,7 @@ def check_teahouse_opening(vertices, indices):
 
 def verify():
     print(f"{'Asset':17s} {'Meshes':>6s} {'Tris':>7s}    {'X/Y/Z (m)':20s}  {'KiB':>5s}")
+    tree_scaffolds = {}
     for name, (span, floor, budget) in CONTRACT.items():
         path = MODELS / f"{name}.glb"
         doc, payload = read_model(path)
@@ -55,6 +73,8 @@ def verify():
         positions = []
         triangles = 0
         assemblies = doc["scenes"][0]["nodes"]
+        if name in BOTANY_PARTS:
+            assert {doc["nodes"][i]["name"].removesuffix(".001") for i in assemblies} == BOTANY_PARTS[name], name
         deck = []
         for node_index in assemblies:
             node = doc["nodes"][node_index]
@@ -79,6 +99,17 @@ def verify():
                     assert max(y for x, y, z in vertices) > 0.90
                 if name == "teahouse":
                     check_teahouse_opening(vertices, indices)
+                if name in BOTANY_PARTS and any(part in node["name"] for part in ("Leaf", "Flower")):
+                    assert doc["materials"][primitive["material"]]["doubleSided"], node["name"]
+                tree = name.removesuffix("-lod")
+                if tree in ("coastal-pine", "ridge-cedar") and "Leaf" not in node["name"]:
+                    part = (tree, node["name"].removesuffix(".001"))
+                    scaffold = (set(vertices), {tuple(vertices[i] for i in indices[j:j + 3])
+                                               for j in range(0, len(indices), 3)})
+                    if name == tree:
+                        tree_scaffolds[part] = scaffold
+                    else:
+                        assert scaffold == tree_scaffolds[part], part
                 positions.extend(vertices)
                 triangles += len(indices) // 3
         assert 1 <= len(assemblies) <= 8 and 0 < triangles <= budget, (name, triangles)
@@ -100,6 +131,9 @@ def verify():
             assert all(abs(x) > 0.60 or z <= 1.98 or y < 0.10 for x, y, z in positions)
         elif name == "festival-lantern":
             assert any(max(m.get("emissiveFactor", (0, 0, 0))) > 0.0 for m in doc["materials"])
+        elif name.startswith("ridge-cedar"):
+            assert max(x * x + z * z for x, y, z in positions) <= 2.75 ** 2, name
+            assert any("baseColorTexture" in material.get("pbrMetallicRoughness", {}) for material in doc["materials"]), name
         print(f"{name:17s} {len(assemblies):6d} {triangles:7d}    {str(tuple(round(x, 2) for x in extent)):20s}"
               f"  {path.stat().st_size / 1024:5.0f}")
     print(f"PASS: {len(CONTRACT)} regional GLBs validated")

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRegionalLayout } from '../src/world/regions/layout.js';
+import { regionalPlantings, regionalPlantModels } from '../src/world/regions/planting.js';
 
 test('the open teahouse foundation stays below the visible floor', () => {
   const { groundAt, buildings } = createRegionalLayout('05');
@@ -16,6 +17,25 @@ test('the open teahouse foundation stays below the visible floor', () => {
 
 const ids = Array.from({length: 9}, (_,i) => String(i+2).padStart(2,'0'));
 const landmarks = ['river-bridge','shrine','water-gate','teahouse','temple','onsen','harbour','jetty','festival-court'];
+
+test('each regional planting stays on dry ground, clear of mapped corridors, and reproducible', () => {
+  for (const id of ids) {
+    const layout = createRegionalLayout(id);
+    const seed = 32671 + Number(id) * 3721;
+    const models = regionalPlantModels(id);
+    const plants = regionalPlantings(id, layout, seed);
+    assert.ok(new Set(plants.map(plant => plant.model)).size >= 2, id);
+    assert.deepEqual(regionalPlantings(id, layout, seed), plants, id);
+    for (const { model, x, y, z, radius } of plants) {
+      assert.ok(models.includes(model), model);
+      assert.ok(y >= layout.waterAt(x, z), `${id} ${model} is underwater`);
+      assert.ok(layout.routeBlend(x, z)[0] >= 1.24 + radius, `${id} ${model} overlaps the route`);
+      for (let k = 0; k < 8; k++) {
+        assert.ok(layout.canWalk(x + Math.cos(k * Math.PI / 4) * radius, z + Math.sin(k * Math.PI / 4) * radius), id);
+      }
+    }
+  }
+});
 
 for (const [index,id] of ids.entries()) {
   const world = createRegionalLayout(id);
