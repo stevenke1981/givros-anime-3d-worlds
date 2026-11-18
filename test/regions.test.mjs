@@ -1,0 +1,52 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createRegionalLayout } from '../src/world/regions/layout.js';
+
+const ids = Array.from({length: 9}, (_,i) => String(i+2).padStart(2,'0'));
+const landmarks = ['river-bridge','shrine','water-gate','teahouse','temple','onsen','harbour','jetty','festival-court'];
+
+for (const [index,id] of ids.entries()) {
+  const world = createRegionalLayout(id);
+  test(`World ${id}: paths stay connected, with walkable grade and named scenic destinations`, () => {
+    assert.equal(world.landmarks[0].id, landmarks[index]);
+    assert.ok(world.canWalk(...world.spec.spawn));
+    for (const [routeId,route] of world.routes.entries()) {
+      for (let s = 1; s < route.length; s++) {
+        const [ax,az] = route[s - 1], [bx,bz] = route[s];
+        const samples = Math.ceil(Math.hypot(bx - ax,bz - az)/.09);
+        let last = world.surfaceAt(ax,az);
+        for (let n = 0; n <= samples; n++) {
+          const x = ax + (bx - ax) * n / samples, z = az + (bz - az) * n / samples;
+          const y = world.surfaceAt(x,z);
+          assert.ok(world.canWalk(x,z), `Route ${routeId} segment ${s}, blocked at (${x.toFixed(2)}, ${z.toFixed(2)})`);
+          assert.ok(Math.abs(y - last) <= .36, `Route ${routeId} segment ${s}, discontinuous path`);
+          last = y;
+        }
+      }
+    }
+    const stair = world.stairs;
+    assert.ok(world.surfaceAt(stair.x,stair.end) - world.surfaceAt(stair.x,stair.start)>1.5);
+    assert.ok(world.landmarks.every(({position}) => position.every(Number.isFinite)));
+  });
+
+  test(`World ${id}: real bridge deck height, rails, water and protected basins`, () => {
+    for (const {x,y,z,deck,camber,inside,outside} of world.crossings) {
+      assert.ok(world.canWalk(x,z));
+      assert.ok(Math.abs(world.surfaceAt(x,z) - y - deck - camber)<1e-9);
+      assert.ok(!world.canWalk(x,z + .5*(inside + outside)));
+    }
+    for (const [x,z] of world.paddies) assert.ok(!world.canWalk(x,z));
+    const z = -13;
+    assert.ok(!world.canWalk(world.centerAt(z),z) || id==='09');
+    if (world.ford) {
+      assert.ok(world.canWalk(world.centerAt(world.ford.z),world.ford.z));
+      assert.ok(Math.abs(world.surfaceAt(world.centerAt(world.ford.z),world.ford.z)-world.ford.y)<1e-9);
+    }
+    if (world.dock) {
+      const {x,y,z,r} = world.dock;
+      assert.ok(world.canWalk(x,z));
+      assert.equal(world.surfaceAt(x,z),y);
+      assert.ok(!world.canWalk(x + Math.sin(r)*5.6,z + Math.cos(r)*5.6));
+    }
+  });
+}
