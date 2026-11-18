@@ -183,7 +183,7 @@ dialog dt { margin-top: 16px; font-weight: 700; }
 dialog dd { margin: 5px 0 0; font-size: .9rem; line-height: 1.7; color: #ece3d5; }
 kbd { border: 1px solid var(--rule); border-radius: 3px; padding: 0 3px; margin-inline: 2px; }
 
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
   .walk-hint { display: none; }
   .touch-pad {
     inset: auto auto var(--bottom) var(--left);
@@ -211,6 +211,6 @@ kbd { border: 1px solid var(--rule); border-radius: 3px; padding: 0 3px; margin-
   .walk-hint { bottom: calc(var(--bottom) + 52px); }
 }
 
-@media (max-width: 359px) and (pointer: coarse) {
+@media (max-width: 359px) and (any-pointer: coarse) {
   .walk-actions { flex-direction: column; }
 }
