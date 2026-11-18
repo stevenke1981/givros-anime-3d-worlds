@@ -90,16 +90,16 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
   expect(errors).toEqual([]);
 });
 
-test('a touch viewport exposes walking controls and keeps navigation usable', async ({ browser }, info) => {
-  const context = await browser.newContext({
+test.describe('touch viewport', () => {
+  test.use({
     hasTouch: true,
     isMobile: true,
     viewport: { width: 390, height: 844 },
-    reducedMotion: 'reduce',
   });
-  try {
-    const page = await context.newPage();
-    await page.goto(new URL('./', info.project.use.baseURL).href);
+  test('exposes walking controls and keeps navigation usable', async ({ page }, info) => {
+    // The two scene loads alone have a combined deadline of 115 seconds on software WebGL.
+    test.setTimeout(150_000);
+    await page.goto('./');
     const explorer = page.locator('#explorer');
     await expect(explorer).toHaveAttribute('data-state', 'ready', { timeout: 45_000 });
     const allViewsFit = await page.locator('.views').evaluate((nav) => nav.scrollWidth <= nav.clientWidth);
@@ -115,9 +115,7 @@ test('a touch viewport exposes walking controls and keeps navigation usable', as
     await sceneMenu.locator('[data-scene-choice="07"]').tap();
     await expect(explorer).toHaveAttribute('data-scene', '07', { timeout: 70_000 });
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('雪國溫泉山村');
-  } finally {
-    await context.close();
-  }
+  });
 });
 
 test('the explorer reports an unavailable WebGL context and offers retry', async ({ page }) => {
