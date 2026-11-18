@@ -155,7 +155,3 @@ export function canWalk(x, z) {
   const gradeZ = (groundAt(x, z + .25) - groundAt(x, z - .25)) * 2;
   return gradeX * gradeX + gradeZ * gradeZ <= .80;
 }
-
-
-
-
