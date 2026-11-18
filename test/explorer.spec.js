@@ -3,6 +3,30 @@ import { expect, test } from '@playwright/test';
 test('the release loads its models, changes viewpoints, and responds to keyboard movement', async ({ page }, info) => {
   const errors = [];
   const modelResponses = [];
+  await page.addInitScript(() => {
+    const gl = WebGL2RenderingContext.prototype;
+    const gaussianShaders = new WeakSet();
+    const gaussianPrograms = new WeakSet();
+    const activePrograms = new WeakMap();
+    const { shaderSource, attachShader, useProgram, drawElementsInstanced } = gl;
+    window.gaussianDraws = 0;
+    gl.shaderSource = function (shader, source) {
+      if (source.includes('kernelPosition')) gaussianShaders.add(shader);
+      return shaderSource.call(this, shader, source);
+    };
+    gl.attachShader = function (program, shader) {
+      if (gaussianShaders.has(shader)) gaussianPrograms.add(program);
+      return attachShader.call(this, program, shader);
+    };
+    gl.useProgram = function (program) {
+      activePrograms.set(this, program);
+      return useProgram.call(this, program);
+    };
+    gl.drawElementsInstanced = function (mode, count, type, offset, instances) {
+      if (instances && gaussianPrograms.has(activePrograms.get(this))) window.gaussianDraws += 1;
+      return drawElementsInstanced.call(this, mode, count, type, offset, instances);
+    };
+  });
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
@@ -25,6 +49,7 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
   const shrine = page.getByRole('button', { name: '神社', exact: true });
   await shrine.click();
   await expect(shrine).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => window.gaussianDraws), { timeout: 20_000 }).toBeGreaterThan(0);
   const shrineView = await page.screenshot({ path: info.outputPath('shrine.png') });
   expect(shrineView.equals(initial)).toBe(false);
 

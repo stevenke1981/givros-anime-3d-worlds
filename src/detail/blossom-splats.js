@@ -8,7 +8,8 @@ export function createBlossomDetail(scene) {
   const matrix = new Matrix4();
   const normals = new Matrix3();
   scene.traverse((node) => {
-    if (!node.isInstancedMesh || !/blossom/i.test(node.name) || !/blossom/i.test(node.material.name)) return;
+    if (!node.isInstancedMesh || node.userData.assetId !== 'sakura'
+      || node.material.name !== 'Paint | leaves and blossoms') return;
     const { index, attributes } = node.geometry;
     const triangles = (index?.count ?? attributes.position.count) / 3;
     for (let instance = 0; instance < node.count; instance += 1) {

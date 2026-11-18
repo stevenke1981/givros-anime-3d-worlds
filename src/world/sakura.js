@@ -31,13 +31,14 @@ async function loadAssets(onProgress) {
   return Object.fromEntries(assets);
 }
 
-function batchAsset(scene, parts, placements, { castShadow = true, receiveShadow = true } = {}) {
+function batchAsset(scene, parts, placements, { castShadow = true, receiveShadow = true, assetId } = {}) {
   if (!placements.length) return;
   const matrix = new THREE.Matrix4();
   const transform = new THREE.Object3D();
   for (const part of parts) {
     const instances = new THREE.InstancedMesh(part.geometry, part.material, placements.length);
     instances.name = part.name;
+    if (assetId) instances.userData.assetId = assetId;
     instances.castShadow = castShadow;
     instances.receiveShadow = receiveShadow;
     for (const [i, [x, y, z, rotation, sx, sy = sx, sz = sx, color]] of placements.entries()) {
@@ -90,7 +91,7 @@ function populate(scene, assets) {
   batchAsset(scene, assets.sakura, blossomSites.map(([x, z, size], i) => {
     hitCircles.push([x, z, Math.min(.7, size * .47)]);
     return [x, groundAt(x, z) - .065, z, i * 1.41, size, size, size, new THREE.Color(blossomTints[i])];
-  }));
+  }), { assetId: 'sakura' });
 
   const cedarNear = [], cedarFar = [], bamboo = [], rock = [], rice = [], fences = [], lanterns = [];
   const treeTints = ['#eff2e4','#d6e5de','#dce9bc','#e9edcd','#f4f3d8','#c5d8cc'];
