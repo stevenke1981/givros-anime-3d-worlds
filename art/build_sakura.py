@@ -670,14 +670,14 @@ def sakura():
                 node = elbow_point.lerp(tip, 0.12 + spray * 0.27)
                 end_point = node + ray * RNG.uniform(0.19, 0.43) + Vector((0, 0, RNG.uniform(-0.11, 0.18)))
                 wood.stem([node, end_point], [0.008, 0.003], CEDAR_WOOD[3], 4)
-                for j in range(7):
+                for j in range(8):
                     phase = angle + j * 2.40 + RNG.uniform(-0.35, 0.35)
                     rise = RNG.uniform(-0.12, 0.16)
                     radial = Vector((cos(phase), sin(phase), 0))
                     reach = RNG.uniform(0.045, 0.15)
-                    center = node.lerp(end_point, 0.28 + j * 0.112) + radial * reach + Vector((0, 0, rise))
+                    center = node.lerp(end_point, 0.23 + j * 0.105) + radial * reach + Vector((0, 0, rise))
                     facing = radial * 0.68 + Vector((0, 0, RNG.uniform(-0.90, 1.10)))
-                    radius = RNG.uniform(0.075, 0.144)
+                    radius = RNG.uniform(0.090, 0.178)
                     lightness = (2 + ((limb + spray) % 2)) if rise < -0.06 else 4
                     cherry_blossom(buds, center, facing, radius, phase, RNG.choice(FLOWERS[lightness:]))
                 for offset in (0.38, 0.81):
@@ -706,9 +706,33 @@ def cedar_spray(mesh, root, tip, breadth, paint, teeth):
     mesh.add(vertices, faces, [paint[0], paint[1]] * (teeth + 1))
 
 
+def cedar_bough(mesh, root, tip, breadth, droop, paint, simple=False):
+    """Closed tapered plume, broad above the branch and ragged below its silhouette."""
+    direction = tip - root
+    lateral = Vector((-direction.y, direction.x, 0)).normalized()
+    vertices = [root]
+    sections = ((0.36, 0.91, -0.10, 1.0), (0.72, 0.66, 0.12, 0.67)) if simple else (
+        (0.18, 0.51, -0.14, 0.43), (0.51, 1.0, 0.09, 1.0), (0.80, 0.56, -0.12, 0.58))
+    for t, width, lean, crown in sections:
+        mid = root.lerp(tip, t) + lateral * (breadth * lean)
+        mid.z -= sin(pi * t) * droop * 0.24
+        vertices.extend([mid + lateral * breadth * width,
+                         mid + Vector((0, 0, droop * crown * 0.69)),
+                         mid - lateral * breadth * width * 0.85,
+                         mid + Vector((0, 0, -droop * crown))])
+    vertices.append(tip)
+    faces = [(0, 1 + (j + 1) % 4, 1 + j) for j in range(4)]
+    end = len(vertices) - 5
+    for start in range(1, end, 4):
+        faces.extend([(start + j, start + (j + 1) % 4, start + 4 + (j + 1) % 4, start + 4 + j)
+                      for j in range(4)])
+    faces.extend([(end + 4, end + j, end + (j + 1) % 4) for j in range(4)])
+    mesh.add(vertices, faces, [paint[1], paint[1], paint[0], paint[0]] * (len(sections) + 1))
+
+
 def cedar(distant=False):
     wood = Mesh("Swept cedar trunk and loaded branches", smooth=True)
-    needles = Mesh("Interleaved pendent needle fans", LEAVES, smooth=True)
+    needles = Mesh("Overlapping pendant boughs and toothed needle sprays", LEAVES, smooth=True)
     trunk = [(0, 0, 0), (0.042, -0.025, 1.30), (-0.07, 0.055, 3.4),
              (-0.02, -0.09, 5.77), (0.11, 0.02, 7.68), (0.035, 0.00, 9.10)]
     wood.stem(trunk, [0.296, 0.224, 0.162, 0.104, 0.053, 0.008], CEDAR_WOOD[1], 9)
@@ -726,30 +750,40 @@ def cedar(distant=False):
         if not distant or index < 5:
             wood.stem([base, elbow, tip], [0.040 * (1 - t) + 0.012, 0.027 * (1 - t) + 0.007, 0.004],
                       CEDAR_WOOD[2], 5)
-        paint = PINE[1 + index % 3:3 + index % 3]
-        for offset in ((0.43, 0.70, 0.88) if distant else (0.34, 0.55, 0.72, 0.88)):
+        shade = 1 + (index * 5 // 7) % 2
+        paint = PINE[shade:shade + 2]
+        cedar_bough(needles, base - outward * 0.10, tip + outward * 0.13,
+                    0.18 + 0.16 * span, 0.21 + 0.10 * span, paint)
+        for sign in (-1, 1):
+            offshoot = base.lerp(elbow, 0.50 + 0.14 * sign)
+            end = elbow.lerp(tip, 0.35 + 0.16 * sign) + sign * lateral * (0.20 + 0.28 * span)
+            end.z += (0.28 if sign == 1 else -0.20) * (1 - 0.30 * t)
+            cedar_bough(needles, offshoot, end, 0.16 + 0.13 * span,
+                        0.24 + 0.11 * span, PINE[shade + 1:shade + 3], simple=distant)
+        if distant:
+            continue
+        for offset in (0.37, 0.61, 0.78, 0.92):
             root = base.lerp(elbow, offset * 2) if offset <= 0.5 else elbow.lerp(tip, (offset - 0.5) * 2)
             for sign in (-1, 1):
                 width = (0.38 + 0.35 * span) * (1 - 0.53 * offset)
                 endpoint = root + sign * lateral * width + outward * width * 0.60
                 endpoint.z -= 0.28 * (1 - offset) * width
-                cedar_spray(needles, root, endpoint, width * (0.51 if distant else 0.37),
-                            paint, 2 if distant else 5)
-                if not distant:
-                    for feather in range(2):
-                        fork = root.lerp(endpoint, 0.29 + feather * 0.25)
-                        tuft = fork + (sign * lateral * 0.31 + outward * 0.69) * width
-                        tuft.z += (feather - 1) * 0.06
-                        cedar_spray(needles, fork, tuft, width * 0.18, paint, 3)
-        if not distant or index % 2 == 0:
-            cedar_spray(needles, elbow, tip + outward * 0.10, span * 0.13, paint, 3 if distant else 6)
+                cedar_spray(needles, root, endpoint, width * 0.37, paint, 5)
+                fork = root.lerp(endpoint, 0.66)
+                tuft = fork + (sign * lateral * 0.31 + outward * 0.69) * width
+                tuft.z -= 0.13
+                cedar_spray(needles, fork, tuft, width * 0.18, paint, 4)
+        cedar_spray(needles, elbow, tip + outward * 0.10, span * 0.13, paint, 6)
     for i in range(9):
         a = i * 2.40
         root = Vector((0.03, 0.02, 8.42 + i * 0.056))
         tip = root + Vector((cos(a) * 0.41, sin(a) * 0.41, 0.19))
-        cedar_spray(needles, root, tip, 0.14, PINE[3:5], 3)
+        if i % 2 == 0:
+            cedar_bough(needles, root, tip, 0.17, 0.21, PINE[3:5])
+        elif not distant:
+            cedar_spray(needles, root, tip, 0.14, PINE[3:5], 3)
     # Both export variants carry the same footprint around the unchanged trunk anchor.
-    x_scale, y_scale = (0.96, 1.04) if distant else (0.875, 0.94)
+    x_scale, y_scale = (1.016, 1.060) if distant else (0.853, 0.907)
     for group in (wood, needles):
         group.vertices = [(x * x_scale, y * y_scale, z) for x, y, z in group.vertices]
     return [wood, needles]
