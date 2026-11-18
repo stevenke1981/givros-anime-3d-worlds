@@ -164,16 +164,16 @@ export function addSky(scene) {
         float towardSun = max(0., dot(ray,sun));
         color += vec3(.25,.17,.09) * pow(towardSun,20.) + vec3(.75,.58,.37) * pow(towardSun,460.);
         vec2 chart = vec2(atan(ray.x, -ray.z), ray.y);
-        vec2 patch = chart * vec2(9., 24.);
+        vec2 cloudCoord = chart * vec2(9., 24.);
         float cover = max(
           1. - length((chart - vec2(-1.36,.20)) / vec2(.53,.104)),
           1. - length((chart - vec2(-.23,.125)) / vec2(.53,.079))
         );
         cover = max(cover, .80 - length((chart - vec2(.70,.22)) / vec2(.58,.095)));
-        float density = cover + (cloudNoise(patch) - .46) * .85;
+        float density = cover + (cloudNoise(cloudCoord) - .46) * .85;
         float cloud = smoothstep(.02,.22,density) * smoothstep(.015,.068,altitude);
         float crown = smoothstep(-.055,.065,chart.y - .145 +
-          (cloudNoise(patch + vec2(-.1,.18)) - .5) * .17);
+          (cloudNoise(cloudCoord + vec2(-.1,.18)) - .5) * .17);
         vec3 lit = mix(vec3(.63,.75,.89), vec3(1.,.99,.96), crown);
         color = mix(color, lit, cloud * .94);
         gl_FragColor = vec4(color, 1.);
