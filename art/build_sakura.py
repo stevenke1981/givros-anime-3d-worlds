@@ -67,9 +67,10 @@ RITUAL_PAPER = material("Paint | thin, two-sided paper", 0.86, double_sided=True
 
 
 class Mesh:
-    def __init__(self, name, finish=MATTE):
+    def __init__(self, name, finish=MATTE, smooth=False):
         self.name = name
         self.finish = finish
+        self.smooth = smooth
         self.vertices = []
         self.faces = []
         self.colors = []
@@ -153,6 +154,10 @@ class Mesh:
                            if sum(vertices[i][2] for i in face) / len(face) < z - h * 0.20
                            else RNG.choice(paint[max(0, len(paint) // 2 - 2):])
                            for face in faces]
+            if self.smooth:
+                face_colors = [tuple(channel * 0.45 + middle * 0.55
+                                     for channel, middle in zip(shade, paint[len(paint) // 2 - 1]))
+                               for shade in face_colors]
         else:
             face_colors = paint
         self.add(vertices, faces, face_colors)
@@ -171,6 +176,8 @@ class Mesh:
         bmesh.ops.recalc_face_normals(editable, faces=editable.faces)
         editable.to_mesh(mesh)
         editable.free()
+        if self.smooth:
+            mesh.polygons.foreach_set("use_smooth", [True] * len(mesh.polygons))
         mesh.update()
         mesh.materials.append(self.finish)
         obj = bpy.data.objects.new(self.name, mesh)
@@ -497,7 +504,7 @@ def torii():
 
 def sakura():
     wood = Mesh("Root flare, forked trunk and flowering limbs")
-    buds = Mesh("Clouds of blossoms and individually swept petal sprays", FOLIAGE)
+    buds = Mesh("Clouds of blossoms and individually swept petal sprays", FOLIAGE, smooth=True)
     trunk = [(0, 0, 0), (0.01, -0.07, 0.44), (-0.12, -0.02, 1.25),
              (-0.33, 0.14, 2.26), (-0.17, 0.25, 3.02), (0.12, 0.33, 3.78),
              (0.28, 0.55, 4.64), (0.69, 0.59, 5.19)]
@@ -544,7 +551,7 @@ def sakura():
     return [wood, buds]
 
 
-def cedar():
+def cedar(distant=False):
     wood = Mesh("Cedar trunk, exposed roots and bent fans")
     needles = Mesh("Overlapping cedar sprays", FOLIAGE)
     wood.stem([(0, 0, 0), (0.027, -0.06, 1.23), (-0.06, 0.08, 3.85),
@@ -558,8 +565,16 @@ def cedar():
             phase = 2 * pi * arm / arms + 1.31 * level
             dx, dy = cos(phase), sin(phase)
             tip = Vector((dx * span, dy * span, z - 0.24 + RNG.uniform(-0.13, 0.12)))
-            wood.stem([(0, 0, z), (tip.x * 0.56, tip.y * 0.56, z - 0.32), tip],
-                      [0.066, 0.045, 0.012], CEDAR_WOOD, 5)
+            if not distant or level < 2:
+                wood.stem([(0, 0, z), (tip.x * 0.56, tip.y * 0.56, z - 0.32), tip],
+                          [0.066, 0.045, 0.012], CEDAR_WOOD, 5)
+            if distant:
+                for offset, half_width in ((0.44, 0.63), (0.89, 0.54)):
+                    scale = 0.73 + span * 0.22
+                    needles.volume((tip.x * offset, tip.y * offset, z + 0.09),
+                                   (scale * half_width, scale * half_width, scale * 0.39),
+                                   PINE, 5, 2, 0.11)
+                continue
             for offset, count in ((0.42, 2), (0.72, 2), (0.96, 1)):
                 for sign in (-1, 1) if count > 1 else (0,):
                     cx = tip.x * offset + dy * sign * span * 0.15
@@ -694,6 +709,7 @@ def build():
         "house": building, "bridge": bridge, "torii": torii, "shrine": lambda: building(shrine=True),
         "sakura": sakura, "cedar": cedar, "stone-lantern": lantern, "rock": rock,
         "bamboo": bamboo, "rice": rice, "fence": fence, "stair-tread": stair_tread,
+        "cedar-lod": lambda: cedar(distant=True),
     }
     for index, (name, design) in enumerate(library.items()):
         RNG.seed(170114 + index)

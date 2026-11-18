@@ -21,6 +21,7 @@ EXPECTED = {
     "rice": (0.60, 0.62, 0.60),
     "fence": (2.4, 1.04, 0.20),
     "stair-tread": (3.0, 0.32, 0.38),
+    "cedar-lod": (4.35, 9.1, 4.48),
 }
 
 
@@ -105,6 +106,8 @@ def verify():
                 assert_close(actual, exact)
         if name == "stair-tread":
             assert_close(maximum[1], 0)
+        if name == "cedar-lod":
+            assert triangles <= 2400, triangles
         assert 0 < triangles < 18000, (name, triangles)
         print(f"{name:16s} {primitive_count:5d} {triangles:7d} {str(tuple(round(x, 2) for x in size)):>22s} "
               f"  {path.stat().st_size / 1024:7.1f}")
