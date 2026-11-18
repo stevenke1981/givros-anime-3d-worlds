@@ -87,9 +87,9 @@ export function addTerrain(scene) {
 
 export function addMountains(scene) {
   const ridges = [
-    { z: -226, depth: 128, width: 276, offset: 18, height: 83, shift: 2.8, green: '#8dabc0', rock: '#aabfd0', shade: '#779bb6' },
-    { z: -171, depth: 107, width: 234, offset: -23, height: 72, shift: 1.2, green: '#6c9696', rock: '#96adb1', shade: '#527c8a' },
-    { z: -114, depth: 111, width: 188, offset: -8, height: 61, shift: .2, green: '#547c62', rock: '#969b98', shade: '#435f66' },
+    { z: -257, depth: 148, width: 340, offset: -13, height: 89, shift: 2.8, green: '#87a8bf', rock: '#adc2d3', shade: '#7399b5' },
+    { z: -191, depth: 112, width: 270, offset: -20, height: 65, shift: 1.2, green: '#6e9397', rock: '#9baeb7', shade: '#557d8b' },
+    { z: -139, depth: 117, width: 213, offset: -46, height: 59, shift: .2, green: '#547b69', rock: '#91a0a1', shade: '#46636b' },
   ];
   ridges.forEach(({ z: centerZ, depth, width, offset, height, shift, green, rock, shade }, layer) => {
     const needles = new THREE.Color(green);
@@ -98,13 +98,14 @@ export function addMountains(scene) {
     const mesh = landscapeMesh(160, 104, (u, v) => {
       const x = offset + (u - .5) * width;
       const z = centerZ + (v - .5) * depth;
-      const slopes = Math.max(0, 1 - Math.abs(v - .40 - .08 * Math.sin(u * 12 + shift)) / .62);
-      const spine = Math.max(0, 1 - Math.abs(u - .47 + .022 * Math.sin(u * 88)) / .53);
-      const crest = .66 + .12 * Math.sin(u * 17 + shift) + .10 * Math.sin(u * 30 + shift) +
-        .07 * Math.sin(u * 55 + shift) + .025 * Math.sin(u * 109);
+      const spineCenter = .37 + .065 * Math.sin(u * 12 + shift) + .021 * Math.sin(u * 47);
+      const slopes = smooth(.60, .015, Math.abs(v - spineCenter));
+      const spine = Math.sin(u * Math.PI) ** .67;
+      const crest = .77 + .080 * Math.sin(u * 17 + shift) + .049 * Math.sin(u * 30 + shift) +
+        .040 * Math.sin(u * 52 + shift) + .012 * Math.sin(u * 113);
       const strata = Math.sin((x + z * .52) * .56) * .5 + Math.sin((x - z * .16) * 1.10) * .5;
       const buttress = Math.sin(x * .18 + z * .072) * .55 + Math.cos(z * .23 - x * .37) * .36;
-      const y = -3.7 + height * Math.pow(slopes, 1.32) * Math.pow(spine, .64) *
+      const y = -3.7 + height * Math.pow(slopes, 1.12) * spine *
         (crest + buttress * .105 + strata * .022);
       const exposure = smooth(15, 42, y) * smooth(-.55, .64, buttress + strata * .46) +
         .33 * smooth(.35, 1.1, buttress + strata) * smooth(7, 23, y);
@@ -138,8 +139,8 @@ export function addSky(scene) {
     side: THREE.BackSide,
     depthWrite: false,
     uniforms: {
-      horizon: { value: new THREE.Color('#d5e9f4') },
-      zenith: { value: new THREE.Color('#4e9ddd') },
+      horizon: { value: new THREE.Color('#d8edf6') },
+      zenith: { value: new THREE.Color('#4e9ad8') },
       sun: { value: sunDirection }
     },
     vertexShader: `
@@ -159,16 +160,22 @@ export function addSky(scene) {
       void main() {
         vec3 ray = normalize(vRay);
         float altitude = max(0., ray.y);
-        vec3 color = mix(horizon, zenith, smoothstep(-.015, .66, altitude));
+        vec3 color = mix(horizon, zenith, smoothstep(-.035, .47, altitude));
         float towardSun = max(0., dot(ray,sun));
         color += vec3(.25,.17,.09) * pow(towardSun,20.) + vec3(.75,.58,.37) * pow(towardSun,460.);
-        vec2 patch = ray.xz * (2.5 / (.24 + altitude)) + vec2(4., -12.);
-        patch.x *= 1.22;
-        float density = cloudNoise(patch + vec2(0., noise(patch * .56) * .75));
-        float densityOffset = cloudNoise(patch + vec2(-.15,.11));
-        float cloud = smoothstep(.56,.69,density) * smoothstep(.015,.135,altitude);
-        vec3 lit = mix(vec3(.66,.77,.91), vec3(1.,.99,.94), smoothstep(-.04,.055,density - densityOffset));
-        color = mix(color, lit, cloud * .96);
+        vec2 chart = vec2(atan(ray.x, -ray.z), ray.y);
+        vec2 cloudCoord = chart * vec2(9., 24.);
+        float cover = max(
+          1. - length((chart - vec2(-1.36,.20)) / vec2(.53,.104)),
+          1. - length((chart - vec2(-.23,.125)) / vec2(.53,.079))
+        );
+        cover = max(cover, .80 - length((chart - vec2(.70,.22)) / vec2(.58,.095)));
+        float density = cover + (cloudNoise(cloudCoord) - .46) * .85;
+        float cloud = smoothstep(.02,.22,density) * smoothstep(.015,.068,altitude);
+        float crown = smoothstep(-.055,.065,chart.y - .145 +
+          (cloudNoise(cloudCoord + vec2(-.1,.18)) - .5) * .17);
+        vec3 lit = mix(vec3(.63,.75,.89), vec3(1.,.99,.96), crown);
+        color = mix(color, lit, cloud * .94);
         gl_FragColor = vec4(color, 1.);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -186,9 +193,9 @@ export function addWater(scene) {
     side: THREE.DoubleSide,
     uniforms: {
       clock, sun: { value: sunDirection },
-      deep: { value: new THREE.Color('#066f91') },
-      shallow: { value: new THREE.Color('#54bfb0') },
-      reflection: { value: new THREE.Color('#b7deef') },
+      deep: { value: new THREE.Color('#117488') },
+      shallow: { value: new THREE.Color('#64c9bb') },
+      reflection: { value: new THREE.Color('#abd9e9') },
       isPaddy: { value: 0 }
     },
     vertexShader: `
@@ -208,20 +215,23 @@ export function addWater(scene) {
         float center = 2.7*sin((z-1.)*.092) + .65*sin((z-1.)*.24);
         float width = 5.65 + .42*sin((z-1.)*.14) + .22*sin((z-1.)*.32);
         float edge = abs(x-center) / width;
-        float wide = noise(vec2(x*1.1, (z-t*.35)*1.45));
-        float wind = sin(z*7.0 + x*2.15 - t*3.0) + .65*sin(z*4.1 - x*3.3 - t*1.4);
-        float vein = noise(vec2(x * 2.1 - z * .09,(z - t * .58) * 5.4));
+        vec2 uv = vec2(x, z - t * .42);
+        float wide = noise(uv * vec2(.42,.57));
+        float swirl = noise(uv * vec2(.73,1.62));
+        float wind = 2. * swirl - 1. +
+          .33 * sin(z * 4.2 + x * 1.37 - t * 1.9 + wide * 8.);
+        float vein = noise(vec2(x * 1.8 - z * .10 + wide * 1.4, (z - t * .58) * 4.1));
         float littoral = smoothstep(.47,1.07,edge) * (1. - isPaddy);
-        vec3 body = mix(deep, shallow, .09 + littoral * .72 + wide * .13);
+        vec3 body = mix(deep, shallow, .05 + littoral * .61 + wide * .21);
         vec3 view = normalize(cameraPosition - wPos);
-        vec3 norm = normalize(vec3(.03 * wind, 1., .075 * wind + .08 * (vein-.5)));
+        vec3 norm = normalize(vec3(.026 * wind, 1., .041 * wind + .05 * (vein-.5)));
         float fresnel = pow(1. - max(dot(view, norm),0.),3.);
         float reflectedClouds = noise(vec2(x*.18, z*.27)) * .25;
         body = mix(body, reflection, min(.69, .09 + fresnel*.54 + reflectedClouds * fresnel));
-        float streak = smoothstep(.75,.94,vein + .07 * wind) * smoothstep(.26,.81,wide);
+        float streak = smoothstep(.82,.97,vein + .045 * wind) * smoothstep(.35,.86,wide);
         float foam = smoothstep(.92,1.03,edge) * smoothstep(.60,.80,vein) * (1. - isPaddy);
-        float glint = pow(max(0.,dot(reflect(-sun,norm),view)),105.) * (.55 + wide * .45);
-        body += vec3(.20,.26,.24) * (streak * .49 + foam * .72) + vec3(.64,.53,.33)*glint;
+        float glint = pow(max(0.,dot(reflect(-sun,norm),view)),110.) * (.26 + wide * .58);
+        body += vec3(.18,.24,.23) * (streak * .40 + foam * .43) + vec3(.40,.37,.27)*glint;
         gl_FragColor = vec4(body,1.);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
