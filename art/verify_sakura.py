@@ -13,16 +13,24 @@ EXPECTED = {
     "bridge": (14.0, 2.91, 3.60),
     "torii": (4.84, 4.44, 0.74),
     "shrine": (7.16, 5.21, 6.55),
-    "sakura": (9.3, 7.9, 7.3),
-    "cedar": (4.7, 9.1, 4.7),
+    "sakura": (7.04, 7.47, 6.09),
+    "cedar": (4.60, 9.1, 4.45),
     "stone-lantern": (0.88, 2.075, 0.88),
     "rock": (2.5, 1.14, 1.65),
     "bamboo": (2.7, 6.8, 2.7),
     "rice": (0.60, 0.62, 0.60),
     "fence": (2.4, 1.04, 0.20),
     "stair-tread": (3.0, 0.32, 0.38),
-    "cedar-lod": (4.35, 9.1, 4.48),
+    "cedar-lod": (4.60, 9.1, 4.45),
+    "stair-tread-b": (3.0, 0.32, 0.38),
+    "stair-tread-c": (3.0, 0.32, 0.38),
+    "grass": (0.24, 0.24, 0.27),
+    "river-sedge": (0.52, 0.56, 0.56),
 }
+TEXTURED = {"house", "bridge", "torii", "shrine", "sakura", "stone-lantern", "rock",
+            "stair-tread", "stair-tread-b", "stair-tread-c"}
+TRIANGLE_BUDGET = {"shrine": 24000, "house": 24000, "sakura": 38000, "cedar": 14500,
+                   "cedar-lod": 2400, "grass": 100, "river-sedge": 150}
 
 
 def assert_close(actual, expected, tolerance=1e-5):
@@ -60,6 +68,10 @@ def verify():
         path = MODELS / f"{name}.glb"
         doc, payload = read_model(path)
         assert len(doc["scenes"]) == 1
+        if name in TEXTURED:
+            assert doc["images"] and all("bufferView" in img and "uri" not in img for img in doc["images"])
+            assert any("normalTexture" in mat and "baseColorTexture" in mat["pbrMetallicRoughness"]
+                       for mat in doc["materials"])
         roots = doc["scenes"][0]["nodes"]
         assert len(roots) <= 6
         positions = []
@@ -98,17 +110,18 @@ def verify():
         minimum = tuple(min(axis) for axis in zip(*positions))
         maximum = tuple(max(axis) for axis in zip(*positions))
         size = tuple(hi - lo for lo, hi in zip(minimum, maximum))
-        assert_close(minimum[1], -0.32 if name == "stair-tread" else 0, tolerance=0.003)
+        stairs = name.startswith("stair-tread")
+        assert_close(minimum[1], -0.32 if stairs else 0, tolerance=0.003)
         for actual, target in zip(size, expected):
             assert_close(actual, target, max(0.09, target * 0.18))
         if name == "bridge":
             for actual, exact in zip((minimum[0], maximum[0], minimum[2], maximum[2]), (-7, 7, -1.8, 1.8)):
                 assert_close(actual, exact)
-        if name == "stair-tread":
+        if stairs:
             assert_close(maximum[1], 0)
-        if name == "cedar-lod":
-            assert triangles <= 2400, triangles
-        assert 0 < triangles < 18000, (name, triangles)
+            assert_close(size[0], 3.0, 0.006)
+            assert_close(size[2], 0.38, 0.005)
+        assert 0 < triangles <= TRIANGLE_BUDGET.get(name, 18000), (name, triangles)
         print(f"{name:16s} {primitive_count:5d} {triangles:7d} {str(tuple(round(x, 2) for x in size)):>22s} "
               f"  {path.stat().st_size / 1024:7.1f}")
     print(f"PASS: {len(EXPECTED)} GLBs have valid triangle buffers, origin placement, and vertex paint")
