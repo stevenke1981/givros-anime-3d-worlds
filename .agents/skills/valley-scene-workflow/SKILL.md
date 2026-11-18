@@ -10,3 +10,4 @@ description: Build or refine walkable Three.js worlds in this repository using e
 3. 在 Three.js 用固定亂數種子安排密度、比例和角度。沿田埂與溪岸作成疏密變化的群聚。用 `groundAt` 貼地，避開路心、田水和建物。將相同的 GLB 分塊實例化，在遠處用低成本模型，優先保留近景的葉片輪廓。枝葉可用 `gaussianKind` 加入既有的程序 Gaussian 細節。用相同鏡位對照 `?splats=off`，檢查遮蔽和透明邊緣。
 4. 核對草葉與裝飾件不妨礙步行，並同步更新可阻擋的樹幹、階梯、橋面和水岸高度。以 `?trace-walk` 讀取相機座標，確認入口到地標可用鍵盤和觸控抵達。
 5. 從專案根目錄執行 `npm test`、`npm run build` 和 `npm run smoke`。用 `test-results/` 裡的實拍檢查玩家眼高的構圖、物件接地與窄螢幕導覽。素材改動應一起提供建模來源、`.blend`、GLB 與可重建命令。
+6. 地標烘焙保留既有 Weathering UV0，Cycles AO 使用獨立 UV1。依 `art/baked-landmarks.md` 重建與檢查來源和匯出，先以 `lighting=legacy` 同鏡位對照，再用 `ao=off` 確認接縫特徵。從正式建置執行 `npm run compare:lighting` 保存實拍，並驗證觸控步行、日景高光與夜景暗部。

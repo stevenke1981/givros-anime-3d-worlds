@@ -9,18 +9,18 @@ const trailLabels = {
   '08': '海岬小徑', '09': '湖畔山徑', '10': '祭典入口',
 };
 
-export async function createRegionalWorld(id, {renderer,onProgress=()=>{}}={}) {
+export async function createRegionalWorld(id, {renderer,onProgress=()=>{},useBakedMaterials=false}={}) {
   const layout=createRegionalLayout(id);
   const {spec,surfaceAt,canWalk}=layout;
   onProgress(.08,'準備地形');
-  const assets=await loadRegionalAssets(layout,onProgress);
+  const assets=await loadRegionalAssets(layout,onProgress,useBakedMaterials);
   const scene=new THREE.Scene();
   if (spec.night) scene.userData.gaussianExposure=.47;
   if (renderer?.shadowMap) renderer.shadowMap.enabled=true;
   const sun=addAtmosphere(scene,layout);
   onProgress(.64,'生成河流、丘陵與步道');
   addTerrain(scene,layout);
-  const clock=addHydrology(scene,layout,sun);
+  const clock=addHydrology(scene,layout,sun,useBakedMaterials);
   onProgress(.83,'排列房屋、地標與林木');
   const blocks=populateRegionalWorld(scene,layout,assets,32671+Number(id)*3721);
   const steam=addSteam(scene,spec.pool);

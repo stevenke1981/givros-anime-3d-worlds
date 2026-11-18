@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { paddyShape, mix } from '../layout.js';
 import { randomSequence } from '../landscape.js';
+import { modelPath } from '../model-path.js';
 import { plantingKinds, plantingLOD, regionalPlantings, regionalPlantModels } from './planting.js';
 
-export async function loadRegionalAssets(layout, onProgress) {
+export async function loadRegionalAssets(layout, onProgress, useBakedMaterials) {
   const {spec,buildings,crossings,dock,paddies} = layout;
   const names = new Set(['cedar','cedar-lod','bamboo','shrub','grass','torii','stone-lantern','rock','fence',
     'stair-tread','stair-tread-b','stair-tread-c','retaining-wall',...spec.ecology.slice(0,2),
@@ -23,7 +24,7 @@ export async function loadRegionalAssets(layout, onProgress) {
   let loaded=0;
   const loadedAssets = await Promise.all([...names].map(async name => {
     const model = name === 'cedar' || name === 'cedar-lod' ? 'ridge-' + name : name;
-    const {scene} = await loader.loadAsync(`${import.meta.env.BASE_URL}models/${model}.glb`);
+    const {scene} = await loader.loadAsync(modelPath(model, useBakedMaterials));
     scene.updateMatrixWorld(true);
     const parts=[];
     scene.traverse(node=>{

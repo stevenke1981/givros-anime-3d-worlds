@@ -47,4 +47,8 @@ npm run smoke
 
 Gaussian 細節取樣自枝葉、草地和山體的實際網格，沿表面投影並接受深度遮蔽。地表覆蓋率控制濕岸、裸土和雪地的取樣，各組構件共同分配取樣預算。觸控裝置採用較低的來源取樣和可見實例預算。加上 `?splats=off` 可在同一鏡位比較，加上 `?trace-splats` 可取得各類別的實例數。追蹤步行位置可用 `?trace-walk`。
 
+十景的代表構件以 Cycles 烘焙獨立 AO，由 GLB 的第二組 UV 取樣。底色使用 sRGB，法線、粗糙度與 AO 使用非色彩資料。各景有自己的半浮點 HDR 環境光與 ACES 曝光，支援浮點渲染目標的裝置用一次全螢幕後製處理高光與邊緣。材質來源、烘焙規格及重建方式見 [地標材質烘焙](art/baked-landmarks.md)。
+
+在同一 URL 加上 `lighting=legacy` 可回到舊渲染與 GLB，`ao=off` 可單獨檢查烘焙遮蔽。先建置，再執行 `npm run compare:lighting`，即可在 `release/lighting-comparison/` 產生溪岸、梯田與夜祭的固定鏡位對照。
+
 十組設計原稿與提示詞使用方式見[繁體中文提示詞指南](README_繁體中文.md)。

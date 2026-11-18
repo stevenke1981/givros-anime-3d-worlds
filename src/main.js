@@ -2,6 +2,7 @@ import {
   MathUtils, NeutralToneMapping, PCFShadowMap, PerspectiveCamera, WebGLRenderer,
 } from 'three';
 import { createGaussianDetail } from './detail/gaussian-detail.js';
+import { createLightingPipeline, hasLightingProfile } from './lighting/pipeline.js';
 import { scenes } from './world/catalog.js';
 import { disposeScene } from './world/dispose-scene.js';
 import { advanceWalker, EYE_HEIGHT } from './walk.js';
@@ -30,6 +31,9 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const options = new URLSearchParams(location.search);
 const traceWalk = options.has('trace-walk');
 const traceSplats = options.has('trace-splats');
+const traceLighting = options.has('trace-lighting');
+const legacyLighting = options.get('lighting') === 'legacy';
+const coarse = matchMedia('(any-pointer: coarse)').matches;
 const camera = new PerspectiveCamera(46, 1, 0.14, 700);
 camera.rotation.order = 'YXZ';
 
@@ -37,6 +41,7 @@ const pressedKeys = new Set();
 const touchKeys = new Map();
 let drag;
 let renderer;
+let lighting;
 let world;
 let failed = false;
 let loading = false;
@@ -58,6 +63,7 @@ function clearInput() {
 }
 
 function resize() {
+  if (failed) return;
   const width = Math.max(canvas.clientWidth, 1);
   const height = Math.max(canvas.clientHeight, 1);
   camera.aspect = width / height;
@@ -71,6 +77,7 @@ function resize() {
     canvasWidth = width;
     canvasHeight = height;
     renderer.setSize(width, height, false);
+    lighting.resize(width, height);
   }
   needsDraw = true;
 }
@@ -88,6 +95,7 @@ function setMode(nextMode) {
 function pointCamera(pose) {
   camera.position.fromArray(pose.position);
   camera.lookAt(...pose.target);
+  if (traceLighting) canvas.dataset.cameraPose = JSON.stringify(pose);
 }
 
 function showView(id, restoreFocus = false) {
@@ -156,7 +164,7 @@ function drawFrame(time) {
   if (!needsDraw) return;
   world.update(elapsed, delta, reducedMotion.matches);
   updateDetail?.(camera);
-  renderer.render(world.scene, camera);
+  lighting.render(world.scene, camera);
   needsDraw = false;
 }
 
@@ -170,6 +178,11 @@ function showFailure(message) {
   notice.hidden = false;
   notice.textContent = message;
   retry.hidden = false;
+}
+
+function disposeWorld(candidate) {
+  lighting.release(candidate.scene);
+  disposeScene(candidate.scene);
 }
 
 start.addEventListener('click', startWalk);
@@ -240,16 +253,26 @@ async function loadRequestedScenes() {
       const progress = (_fraction, message) => {
         if (reportProgress && !requestedScene && !failed && message) notice.textContent = descriptor.name + ' · ' + message;
       };
+      const useBakedMaterials = !legacyLighting && hasLightingProfile(descriptor.id);
+      const worldOptions = { renderer, onProgress: progress, useBakedMaterials };
       next = descriptor.id === '01'
-        ? await module.createSakuraWorld({ renderer, onProgress: progress })
-        : await module.createRegionalWorld(descriptor.id, { renderer, onProgress: progress });
+        ? await module.createSakuraWorld(worldOptions)
+        : await module.createRegionalWorld(descriptor.id, worldOptions);
       if (requestedScene || failed) {
-        disposeScene(next.scene);
+        disposeWorld(next);
         continue;
       }
 
+      if (options.get('ao') === 'off') {
+        next.scene.traverse(({ material }) => {
+          for (const part of Array.isArray(material) ? material : [material]) {
+            if (part?.aoMap) part.aoMapIntensity = 0;
+          }
+        });
+      }
+      const lightingMode = lighting.apply(next.scene, descriptor.id);
       const detail = options.get('splats') === 'off' ? undefined : createGaussianDetail(next.scene, {
-        detailScale: matchMedia('(any-pointer: coarse)').matches ? 0.56 : 1,
+        detailScale: coarse ? 0.56 : 1,
         report: traceSplats ? (counts) => { canvas.dataset.gaussianCounts = JSON.stringify(counts); } : undefined,
       });
       const firstView = next.initialView ?? 'overview';
@@ -257,10 +280,10 @@ async function loadRequestedScenes() {
       next.update(0, 0, reducedMotion.matches);
       detail?.(camera);
       renderer.shadowMap.needsUpdate = true;
-      renderer.render(next.scene, camera);
+      lighting.render(next.scene, camera);
 
       if (world) {
-        disposeScene(world.scene);
+        disposeWorld(world);
         renderer.renderLists.dispose();
       }
       world = next;
@@ -268,6 +291,7 @@ async function loadRequestedScenes() {
       updateDetail = detail;
       elapsed = 0;
       explorer.dataset.scene = descriptor.id;
+      explorer.dataset.lighting = lightingMode;
       explorer.dataset.state = 'ready';
       canvas.setAttribute('aria-label', descriptor.name + '即時 3D 場景');
       document.title = descriptor.name + '｜十景漫步';
@@ -293,7 +317,7 @@ async function loadRequestedScenes() {
       url.searchParams.set('scene', descriptor.id);
       history.replaceState(null, '', url);
     } catch (error) {
-      if (next && next !== world) disposeScene(next.scene);
+      if (next && next !== world) disposeWorld(next);
       if (requestedScene || failed) continue;
       console.error(error);
       explorer.dataset.state = 'error';
@@ -368,10 +392,20 @@ function boot() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = PCFShadowMap;
   renderer.shadowMap.autoUpdate = false;
+  lighting = createLightingPipeline(renderer, { legacy: legacyLighting, coarse });
+  window.addEventListener('pagehide', (event) => {
+    if (event.persisted) return;
+    failed = true;
+    renderer.setAnimationLoop(null);
+    if (world) disposeWorld(world);
+    lighting.dispose();
+    renderer.dispose();
+  });
   canvas.addEventListener('webglcontextlost', () => {
     showFailure('3D 繪圖已中斷，請重新載入頁面。');
   });
   new ResizeObserver(resize).observe(canvas);
+  resize();
   renderer.setAnimationLoop(drawFrame);
   selectScene(lastSelected);
 }

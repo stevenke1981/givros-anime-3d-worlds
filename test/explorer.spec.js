@@ -39,6 +39,7 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
   const explorer = page.locator('#explorer');
   const canvas = page.locator('#world');
   await expect(explorer).toHaveAttribute('data-state', 'ready', { timeout: 45_000 });
+  await expect(explorer).toHaveAttribute('data-lighting', 'hdr-post');
   expect(modelResponses.length).toBeGreaterThanOrEqual(6);
   for (const response of modelResponses) {
     expect(response.ok()).toBe(true);
@@ -46,6 +47,9 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
   }
   for (const asset of ['meadow-grass', 'wild-azalea', 'valley-broadleaf']) {
     expect(modelResponses.some((response) => new URL(response.url()).pathname.endsWith('/' + asset + '.glb'))).toBe(true);
+  }
+  for (const asset of ['bridge', 'house']) {
+    expect(modelResponses.some((response) => new URL(response.url()).pathname.endsWith(`/models/baked/${asset}.glb`))).toBe(true);
   }
   await expect(page.getByRole('button', { name: '溪岸步道' })).toHaveAttribute('aria-pressed', 'true');
   const initial = await page.screenshot({ path: info.outputPath('meadow.png') });

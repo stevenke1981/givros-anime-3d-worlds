@@ -7,6 +7,7 @@ import {
 import { addMountains, addSky, addTerrain, addWater, randomSequence, sunDirection } from './landscape.js';
 import { createGroundDetail } from './ground-material.js';
 import { plantUnderstory } from './understory.js';
+import { modelPath } from './model-path.js';
 
 const assetNames = [
   'house', 'bridge', 'torii', 'shrine', 'sakura', 'cedar', 'cedar-lod',
@@ -14,11 +15,11 @@ const assetNames = [
   'grass', 'river-sedge', 'shrub', 'meadow-grass', 'wild-azalea', 'valley-broadleaf'
 ];
 
-async function loadAssets(onProgress) {
+async function loadAssets(onProgress, useBakedMaterials) {
   const loader = new GLTFLoader();
   let loaded = 0;
   const assets = await Promise.all(assetNames.map(async name => {
-    const { scene } = await loader.loadAsync(`${import.meta.env.BASE_URL}models/${name}.glb`);
+    const { scene } = await loader.loadAsync(modelPath(name, useBakedMaterials));
     scene.updateMatrixWorld(true);
     const parts = [];
     scene.traverse(part => {
@@ -316,9 +317,9 @@ function addPetals(scene, blossomSites) {
   };
 }
 
-export async function createSakuraWorld({ renderer, onProgress = () => {} } = {}) {
+export async function createSakuraWorld({ renderer, onProgress = () => {}, useBakedMaterials = false } = {}) {
   onProgress(.07, '準備春櫻山村');
-  const assets = await loadAssets(onProgress);
+  const assets = await loadAssets(onProgress, useBakedMaterials);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#a1cce8');
   scene.fog = new THREE.FogExp2('#c1d8e6', .0041);
