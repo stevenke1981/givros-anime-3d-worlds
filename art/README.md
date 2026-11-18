@@ -24,6 +24,8 @@ The runtime loads the matching file from [public/models](../public/models). Posi
 
 The app supplies colliders. The files are static meshes.
 
+The editable [valley-library.blend](valley-library.blend) adds three original assemblies for the creekside trail. `meadow-grass` has curved blades and separate oat-like seed heads, `wild-azalea` has forks, whorled leaves and five-petal blooms, and `valley-broadleaf` has flared roots, curved limbs and layered leaf sprays. The footprints use the same ground anchor and metric scale.
+
 ## Reusable components
 
 - In [build_sakura.py](build_sakura.py), `roof_tile` lays tapered clay pans along the calculated roof pitch. `kawara` assembles the courses, eave bars, exposed rafters, closed sheathing and ridge caps. `building` shares that roof system between the shrine and timber houses.
@@ -36,6 +38,7 @@ The app supplies colliders. The files are static meshes.
 From the repository root, use PowerShell and adjust the Blender path for your installation.
 
     & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/build_sakura.py
+    & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/build_valley.py
     python art/verify_sakura.py
     & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/preview_sakura.py
 
@@ -45,4 +48,4 @@ The build rewrites the editable library and GLBs. For direct edits in Blender, e
 
 ## Provenance
 
-All assets were authored for this project on 2026-11-18 using the Blender Python API in [build_sakura.py](build_sakura.py), with the [scene brief](../prompts/01_sakura_mountain_village.md) guiding shape, scale and palette. The source, GLBs and preview use original project geometry and vertex paint. No external asset, image, texture, font download or paid generation service was used. The preview labels use Blender’s built-in font. No third-party model license or attribution applies.
+All assets were authored for this project on 2026-11-18 using the Blender Python API in [build_sakura.py](build_sakura.py) and [build_valley.py](build_valley.py), with the [scene brief](../prompts/01_sakura_mountain_village.md) guiding shape, scale and palette. The source, GLBs and preview use original project geometry and vertex paint. No external asset, image, texture, font download or paid generation service was used. The preview labels use Blender’s built-in font. No third-party model license or attribution applies.

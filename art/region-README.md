@@ -25,17 +25,32 @@ The models use meters and exporter Y up. GLB fronts face +Z, corresponding to �
 
 The game supplies colliders and water. The model files contain no animation. Weathering maps are embedded and have no external image dependencies.
 
+## Regional plants
+
+[regional-botany.blend](regional-botany.blend) contains seven editable scenes with separate stems, foliage and flower or seed assemblies where applicable. Each plant is anchored at ground elevation (Y=0 in the GLB). The seaside pine trunk begins at the local origin and leans toward local +X.
+
+| File in public/models | X × Y × Z span (m) | Triangles | Placement and construction |
+| --- | --- | ---: | --- |
+| woodland-fern.glb | 0.79 × 0.53 × 0.77 | 812 | A rosette of arching rachises with paired leaflets for shaded woodland edges. |
+| seasonal-forbs.glb | 0.45 × 0.60 × 0.37 | 444 | Six flowering stems. The runtime preserves the vertex-painted petals and tints the remaining assemblies by region. |
+| shore-reeds.glb | 0.56 × 1.13 × 0.60 | 448 | Tall folded straps and brown seed heads for clumps along the water's edge. |
+| coastal-pine.glb | 5.20 × 4.67 × 4.57 | 8,568 | Exposed roots, wind-shaped scaffold branches and small needle sprays. |
+| coastal-pine-lod.glb | 5.14 × 4.68 × 4.43 | 3,708 | The same trunk and branch geometry with fewer and wider folded sprays. |
+| ridge-cedar.glb | 4.66 × 8.92 × 4.22 | 14,386 | Flared, ridged trunk with embedded bark maps. Alternating branch lengths and overlapping drooping sprays give the crown an uneven edge. |
+| ridge-cedar-lod.glb | 4.46 × 8.92 × 4.10 | 3,902 | The same trunk and branches with simplified inner sprays and crown tips. |
+
 ## Authoring and checks
 
 Use Blender 5.2.1. From the repository root in PowerShell, substitute your Blender path if it differs.
 
     & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/region_build.py
+    & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/build_regional_botany.py
     python art/verify_regions.py
     & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/region_preview.py
 
 [region_build.py](region_build.py) uses separate construction functions per asset. Planks, peg rails and chipped ashlar are reused across waterfront and terrace assets. The winter inn reuses the proven house assembly and spans a modeled snow sheet along the common curved eave. The temple adds a second, compact kawara assembly above the shared hall frame. The vegetation builders place repeated leaf and branch forms through a deterministic seed.
 
-The verifier reads the produced GLBs. It tests root transforms, bounds, triangle indices, vertex paint and normalized normals. It also checks dock and bridge deck elevations, pool and sluice clearances, teahouse storefront sightlines, basin water heights, lantern emission and the absence of external image references. The contact sheet renders the exported geometry and vertex paint through Workbench.
+[build_regional_botany.py](build_regional_botany.py) uses the shared mesh, blade and folded leaf builders for silhouettes and vertex paint. The ridge cedar trunk also uses the shared procedural bark maps. The verifier reads the produced GLBs. It tests root transforms, bounds, triangle indices, vertex paint and normalized normals. It checks the regional plant assemblies for named parts, two-sided foliage and flower petals, identical trunk and branch meshes at both distances, and the ridge cedar's radius and bark color map. It also checks dock and bridge deck elevations, pool and sluice clearances, teahouse storefront sightlines, basin water heights, lantern emission and the absence of external image references. The contact sheet renders the exported geometry and vertex paint through Workbench.
 
 ## Provenance
 

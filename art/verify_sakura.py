@@ -26,11 +26,15 @@ EXPECTED = {
     "stair-tread-c": (3.0, 0.32, 0.38),
     "grass": (0.24, 0.24, 0.27),
     "river-sedge": (0.52, 0.56, 0.56),
+    "meadow-grass": (0.45, 0.41, 0.48),
+    "wild-azalea": (1.04, 0.65, 1.11),
+    "valley-broadleaf": (5.02, 5.66, 5.22),
 }
 TEXTURED = {"house", "bridge", "torii", "shrine", "sakura", "stone-lantern", "rock",
             "stair-tread", "stair-tread-b", "stair-tread-c"}
 TRIANGLE_BUDGET = {"shrine": 24000, "house": 24000, "sakura": 40000, "cedar": 16000,
-                   "cedar-lod": 2400, "grass": 100, "river-sedge": 150}
+                   "cedar-lod": 2400, "grass": 100, "river-sedge": 150,
+                   "meadow-grass": 370, "wild-azalea": 1750, "valley-broadleaf": 8000}
 
 
 def assert_close(actual, expected, tolerance=1e-5):
@@ -111,7 +115,8 @@ def verify():
         maximum = tuple(max(axis) for axis in zip(*positions))
         size = tuple(hi - lo for lo, hi in zip(minimum, maximum))
         stairs = name.startswith("stair-tread")
-        assert_close(minimum[1], -0.32 if stairs else 0, tolerance=0.003)
+        root_tolerance = 0.025 if name in {"wild-azalea", "valley-broadleaf"} else 0.003
+        assert_close(minimum[1], -0.32 if stairs else 0, tolerance=root_tolerance)
         for actual, target in zip(size, expected):
             assert_close(actual, target, 0.15 if name in {"cedar", "cedar-lod"} else max(0.09, target * 0.18))
         if name == "bridge":

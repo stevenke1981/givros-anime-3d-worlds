@@ -11,8 +11,9 @@ const profiles = {
   mountain: { samples: 1950, sourceLimit: 6900, budget: 650, range: 530, radius: 0.6, spread: 1.95, alpha: 0.12, offset: 0.10 },
 };
 
-function sampleSurfaces(scene) {
+function sampleSurfaces(scene, detailScale) {
   const samples = Object.fromEntries(Object.keys(profiles).map((kind) => [kind, []]));
+  const sources = Object.fromEntries(Object.keys(profiles).map((kind) => [kind, []]));
   const matrix = new Matrix4();
   const normals = new Matrix3();
   const instanceColor = new Color();
@@ -21,6 +22,7 @@ function sampleSurfaces(scene) {
   const positionC = new Vector3();
   const edge = new Vector3();
   const crossEdge = new Vector3();
+  const matrixScale = new Vector3();
   let seed = 517194;
   const random = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -35,69 +37,100 @@ function sampleSurfaces(scene) {
     if (!profile || !node.isMesh) return;
     const lod = node.parent?.parent;
     if (lod?.isLOD && lod.levels[0].object !== node.parent) return;
-    const collection = samples[kind];
-    const { index, attributes } = node.geometry;
-    const triangles = (index?.count ?? attributes.position.count) / 3;
     const instances = node.isInstancedMesh ? node.count : 1;
+    sources[kind].push({ node, instances, points: node.userData.gaussianSamples ?? profile.samples });
+  });
 
-    for (let instance = 0; instance < instances && collection.length < profile.sourceLimit; instance += 1) {
-      matrix.copy(node.matrixWorld);
-      if (node.isInstancedMesh) {
-        node.getMatrixAt(instance, matrix);
-        matrix.premultiply(node.matrixWorld);
-      }
-      instanceColor.setRGB(1, 1, 1);
-      if (node.instanceColor) node.getColorAt(instance, instanceColor);
-      normals.getNormalMatrix(matrix);
-      const scale = new Vector3().setFromMatrixScale(matrix).x;
+  for (const [kind, emitters] of Object.entries(sources)) {
+    const profile = profiles[kind];
+    const collection = samples[kind];
+    const requested = emitters.reduce((total, { instances, points }) => total + instances * points, 0);
+    if (!requested) continue;
+    // Allocate attempts across the whole scene so the first grove cannot exhaust the budget.
+    const ratio = Math.min(1, profile.sourceLimit / requested) * detailScale;
+    let assigned = 0;
+    let expected = random();
+    for (const { node, instances, points } of emitters) {
+      const { index, attributes } = node.geometry;
+      const triangles = (index?.count ?? attributes.position.count) / 3;
+      const mask = attributes.gaussianWeight;
+      const radiusScale = node.userData.gaussianRadiusScale ?? 1;
 
-      // Sampling the surface anchors the ellipsoids to shared model parts and heightfields.
-      for (let sample = 0; sample < profile.samples && collection.length < profile.sourceLimit; sample += 1) {
-        const triangle = Math.floor(random() * triangles) * 3;
-        const a = index ? index.getX(triangle) : triangle;
-        const b = index ? index.getX(triangle + 1) : triangle + 1;
-        const c = index ? index.getX(triangle + 2) : triangle + 2;
-        positionA.fromBufferAttribute(attributes.position, a).applyMatrix4(matrix);
-        positionB.fromBufferAttribute(attributes.position, b).applyMatrix4(matrix);
-        positionC.fromBufferAttribute(attributes.position, c).applyMatrix4(matrix);
-        edge.subVectors(positionB, positionA);
-        crossEdge.subVectors(positionC, positionA);
-        const normal = attributes.normal
-          ? new Vector3().fromBufferAttribute(attributes.normal, a).applyNormalMatrix(normals)
-          : new Vector3().crossVectors(edge, crossEdge).normalize();
-        const tint = attributes.color
-          ? new Vector3().fromBufferAttribute(attributes.color, a)
-          : new Vector3().setFromColor(node.material.color);
-        if (kind === 'turf' && (normal.y < 0.52 || tint.y <= tint.x * 0.93 || tint.z >= tint.y * 0.91)) continue;
-        if (kind === 'mountain' && (normal.y < 0.16 || normal.y > 0.90)) continue;
-        const radius = (profile.radius + random() * profile.spread) * scale;
-        let u = random();
-        let v = random();
-        if (u + v > 1) { u = 1 - u; v = 1 - v; }
-        const center = positionA.clone().addScaledVector(edge, u).addScaledVector(crossEdge, v)
-          .addScaledVector(normal, radius * profile.offset);
-        const tangent = edge.clone().addScaledVector(normal, -edge.dot(normal)).normalize();
-        if (!tangent.lengthSq()) continue;
-        if (!node.isInstancedMesh) tangent.applyAxisAngle(normal, random() * Math.PI);
-        const bitangent = new Vector3().crossVectors(normal, tangent);
-        tint.set(tint.x * instanceColor.r, tint.y * instanceColor.g, tint.z * instanceColor.b);
-        tint.multiplyScalar(kind === 'mountain' ? 0.72 + random() * 0.37 : 0.76 + random() * 0.47);
-        collection.push({
-          center, tint, radius,
-          axisT: tangent.multiplyScalar(radius),
-          axisB: bitangent.multiplyScalar(radius * (0.32 + random() * 0.36)),
-          axisN: normal.multiplyScalar(radius * 0.13),
-          opacity: profile.alpha * (0.74 + random() * 0.51),
-          depth: 0,
-        });
+      for (let instance = 0; instance < instances; instance += 1) {
+        expected += points * ratio;
+        const attempts = Math.floor(expected) - assigned;
+        assigned += attempts;
+        if (!attempts) continue;
+        matrix.copy(node.matrixWorld);
+        if (node.isInstancedMesh) {
+          node.getMatrixAt(instance, matrix);
+          matrix.premultiply(node.matrixWorld);
+        }
+        instanceColor.setRGB(1, 1, 1);
+        if (node.instanceColor) node.getColorAt(instance, instanceColor);
+        normals.getNormalMatrix(matrix);
+        const scale = matrixScale.setFromMatrixScale(matrix).x;
+
+        // Sampling the surface anchors the ellipsoids to shared model parts and heightfields.
+        for (let sample = 0; sample < attempts; sample += 1) {
+          const triangle = Math.floor((sample + random()) * triangles / attempts) * 3;
+          const a = index ? index.getX(triangle) : triangle;
+          const b = index ? index.getX(triangle + 1) : triangle + 1;
+          const c = index ? index.getX(triangle + 2) : triangle + 2;
+          let u = random();
+          let v = random();
+          if (u + v > 1) { u = 1 - u; v = 1 - v; }
+          const w = 1 - u - v;
+          const coverage = mask ? mask.getX(a) * w + mask.getX(b) * u + mask.getX(c) * v : 1;
+          if (coverage <= 0.05 || (coverage < 1 && random() > coverage)) continue;
+          positionA.fromBufferAttribute(attributes.position, a).applyMatrix4(matrix);
+          positionB.fromBufferAttribute(attributes.position, b).applyMatrix4(matrix);
+          positionC.fromBufferAttribute(attributes.position, c).applyMatrix4(matrix);
+          edge.subVectors(positionB, positionA);
+          crossEdge.subVectors(positionC, positionA);
+          const vertexNormal = attributes.normal;
+          const normal = vertexNormal
+            ? new Vector3(
+              vertexNormal.getX(a) * w + vertexNormal.getX(b) * u + vertexNormal.getX(c) * v,
+              vertexNormal.getY(a) * w + vertexNormal.getY(b) * u + vertexNormal.getY(c) * v,
+              vertexNormal.getZ(a) * w + vertexNormal.getZ(b) * u + vertexNormal.getZ(c) * v,
+            ).applyNormalMatrix(normals)
+            : new Vector3().crossVectors(edge, crossEdge).normalize();
+          const paint = attributes.color;
+          const tint = paint
+            ? new Vector3(paint.getX(a) * w + paint.getX(b) * u + paint.getX(c) * v,
+              paint.getY(a) * w + paint.getY(b) * u + paint.getY(c) * v,
+              paint.getZ(a) * w + paint.getZ(b) * u + paint.getZ(c) * v)
+            : new Vector3().setFromColor(node.material.color);
+          if (kind === 'turf' && !node.isInstancedMesh && (normal.y < 0.52 ||
+            (!mask && (tint.y <= tint.x * 0.93 || tint.z >= tint.y * 0.91)))) continue;
+          if (kind === 'mountain' && (normal.y < 0.16 || normal.y > 0.90)) continue;
+          const radius = (profile.radius + random() * profile.spread) * scale * radiusScale;
+          const center = positionA.clone().addScaledVector(edge, u).addScaledVector(crossEdge, v)
+            .addScaledVector(normal, radius * profile.offset);
+          const tangent = edge.clone().addScaledVector(normal, -edge.dot(normal)).normalize();
+          if (!tangent.lengthSq()) continue;
+          if (!node.isInstancedMesh) tangent.applyAxisAngle(normal, random() * Math.PI);
+          const bitangent = new Vector3().crossVectors(normal, tangent);
+          tint.set(tint.x * instanceColor.r, tint.y * instanceColor.g, tint.z * instanceColor.b);
+          tint.multiplyScalar(kind === 'mountain' ? 0.72 + random() * 0.37 : 0.76 + random() * 0.47);
+          collection.push({
+            center, tint, radius,
+            axisT: tangent.multiplyScalar(radius),
+            axisB: bitangent.multiplyScalar(radius * (0.32 + random() * 0.36)),
+            axisN: normal.multiplyScalar(radius * 0.13),
+            opacity: profile.alpha * (0.78 + random() * 0.40) * Math.sqrt(coverage),
+            depth: 0,
+          });
+        }
       }
     }
-  });
+  }
   return samples;
 }
 
 export function createGaussianDetail(scene, { detailScale = 1, report } = {}) {
-  const samples = sampleSurfaces(scene);
+  const samples = sampleSurfaces(scene, detailScale);
   if (!Object.values(samples).some((items) => items.length)) return;
   const budgets = Object.fromEntries(Object.entries(profiles).map(([kind, profile]) => [
     kind, Math.round(profile.budget * detailScale),
@@ -123,7 +156,10 @@ export function createGaussianDetail(scene, { detailScale = 1, report } = {}) {
     transparent: true,
     depthWrite: false,
     fog: true,
-    uniforms: UniformsUtils.clone(UniformsLib.fog),
+    uniforms: {
+      ...UniformsUtils.clone(UniformsLib.fog),
+      detailExposure: { value: scene.userData.gaussianExposure ?? 1 },
+    },
     vertexShader: /* glsl */`
       attribute vec3 center, axisT, axisB, axisN, tint;
       attribute float opacity;
@@ -153,13 +189,14 @@ export function createGaussianDetail(scene, { detailScale = 1, report } = {}) {
       }
     `,
     fragmentShader: /* glsl */`
+      uniform float detailExposure;
       varying vec2 kernelPosition;
       varying vec4 flowerColor;
       #include <fog_pars_fragment>
       void main() {
         float alpha = flowerColor.a * exp(-0.5 * dot(kernelPosition, kernelPosition));
         if (alpha < 0.008) discard;
-        gl_FragColor = vec4(flowerColor.rgb, alpha);
+        gl_FragColor = vec4(flowerColor.rgb * detailExposure, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>

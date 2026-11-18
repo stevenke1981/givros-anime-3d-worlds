@@ -231,7 +231,7 @@ export function createRegionalLayout(id) {
     id === '02' ? at('river-bridge',bridge.x,bridge.z) :
     at(sanctuary.model === 'temple' ? 'temple' : 'shrine',sanctuary.x,sanctuary.z);
   return {
-    spec, routes, crossings, dock, ford, paddies, buildings, lanterns,
+    id, spec, routes, crossings, dock, ford, paddies, buildings, lanterns,
     stairs: {...stair,count,depth:stairDepth,yAt:stairY},
     landmarks: [featured,at('lookout',spec.overlook.position[0],spec.overlook.position[2]),
       at('gate',...spec.gate),at('crossing',bridge.x,bridge.z)],

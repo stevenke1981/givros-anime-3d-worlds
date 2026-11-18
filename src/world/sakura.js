@@ -11,7 +11,7 @@ import { plantUnderstory } from './understory.js';
 const assetNames = [
   'house', 'bridge', 'torii', 'shrine', 'sakura', 'cedar', 'cedar-lod',
   'stone-lantern', 'rock', 'bamboo', 'rice', 'fence', 'stair-tread', 'stair-tread-b', 'stair-tread-c',
-  'grass', 'river-sedge', 'shrub'
+  'grass', 'river-sedge', 'shrub', 'meadow-grass', 'wild-azalea', 'valley-broadleaf'
 ];
 
 async function loadAssets(onProgress) {
@@ -203,6 +203,19 @@ function populate(scene, assets) {
   batchAsset(scene, assets.fence, fences);
   batchAsset(scene, assets['stone-lantern'], lanterns);
 
+  const broadleaves = [];
+  for (const [x, z, size, angle] of [
+    [-9.8, 7.8, 1.12, .5], [-14.5, 13.0, 1.21, 2.8], [-8.6, -4.8, .91, 2.1],
+    [8.3, -13.4, .84, 1.2], [10.1, -17.5, .82, 5.3], [19.2, -25.6, 1.29, 2.3],
+    [24.5, -27.8, 1.44, 3.2], [30.7, -26.0, 1.15, 4.1], [39.4, -24.8, .96, 1.8],
+    [17.3, 8.2, .87, 2.9], [36.9, 11.0, 1.27, 2.4], [43.4, -5.4, .83, 3.9],
+  ]) {
+    if (!canWalk(x, z) || blocked(x, z) || laneDistance(x, z) < 1.9) continue;
+    broadleaves.push([x, groundAt(x, z) - .14, z, angle, size]);
+    hitCircles.push([x, z, .36 * size + .22]);
+  }
+  batchAsset(scene, assets['valley-broadleaf'], broadleaves, { gaussianKind: 'tree' });
+
   const shrubPlacements = [];
   const shrubRand = randomSequence(863517);
   for (const [cx, cz] of [[10, 23], [-9, 8], [-21, -32], [-28, -43], [20, 2], [-41, -22], [37, 18]]) {
@@ -219,15 +232,20 @@ function populate(scene, assets) {
   }
   batchAsset(scene, assets.shrub, shrubPlacements, { gaussianKind: 'shrub' });
 
-  const { grass, sedge } = plantUnderstory();
-  for (const [species, plants] of [['grass', grass], ['river-sedge', sedge]]) {
+  const { grass, sedge, meadow, azalea } = plantUnderstory();
+  for (const [species, plants] of [['grass', grass], ['river-sedge', sedge], ['meadow-grass', meadow], ['wild-azalea', azalea]]) {
     const clusters = new Map();
     for (const plant of plants) {
       const cell = `${Math.floor(plant[0] / 24)},${Math.floor(plant[2] / 24)}`;
       if (!clusters.has(cell)) clusters.set(cell, []);
       clusters.get(cell).push(plant);
     }
-    for (const patch of clusters.values()) batchAsset(scene, assets[species], patch, { castShadow: false });
+    for (const patch of clusters.values()) {
+      batchAsset(scene, assets[species], patch, {
+        castShadow: false,
+        gaussianKind: species === 'wild-azalea' ? 'shrub' : undefined,
+      });
+    }
   }
 
   // Complete the distant bank with small trees below the exposed ridgeline.
@@ -304,7 +322,7 @@ export async function createSakuraWorld({ renderer, onProgress = () => {} } = {}
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#a1cce8');
   scene.fog = new THREE.FogExp2('#c1d8e6', .0041);
-  const skylight = new THREE.HemisphereLight('#e2ecff', '#8e8a70', 2.00);
+  const skylight = new THREE.HemisphereLight('#e2ecff', '#8e8a70', 1.53);
   scene.add(skylight);
   const sunlight = new THREE.DirectionalLight('#fff0d4', 2.1);
   sunlight.position.copy(sunDirection).multiplyScalar(102).add(new THREE.Vector3(0, 0, -11));
@@ -332,6 +350,7 @@ export async function createSakuraWorld({ renderer, onProgress = () => {} } = {}
 
   const standing = (x, z, target) => ({ position: [x, surfaceY(x,z) + 1.65, z], target });
   const views = {
+    meadow: standing(22.2, 1.76, [8.5, 1.42, -3.1]),
     overview: { position: [36,22,37], target: [-7,9.8,-16] },
     bridge: standing(10.55,5.6,[-7.2,3.2,-.40]),
     shrine: standing(-21.8,-36.10,[-17.85,9.42,-46.15]),
@@ -351,6 +370,8 @@ export async function createSakuraWorld({ renderer, onProgress = () => {} } = {}
   onProgress(1, '春櫻山村已就緒');
   return {
     scene, spawn, views, landmarks,
+    initialView: 'meadow',
+    viewLabels: { meadow: '溪岸步道' },
     surfaceAt: surfaceY,
     canWalk: (x,z) => canWalk(x,z) && !blocked(x,z),
     update(elapsedSeconds, _deltaSeconds, reducedMotion) {

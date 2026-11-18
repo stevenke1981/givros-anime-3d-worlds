@@ -56,5 +56,41 @@ export function plantUnderstory() {
         sedgeColors[Math.floor(random() * sedgeColors.length)]]);
     }
   }
-  return { grass, sedge };
+  const meadow = [], azalea = [];
+  const patchRandom = randomSequence(48173);
+  const meadowTints = ['#f2ead3', '#fff2d8', '#e6eacb', '#dde2b8'].map(value => new THREE.Color(value));
+  // Narrow drifts along the outer paddy berms and the dry shoulder above the river.
+  for (const [cx, cz, width, depth] of [
+    [14.2, 0.8, 3.6, 1.7], [18.1, 3.7, 5.4, 1.1], [23.7, 0.1, 4.8, 1.7],
+    [17.2, 3.28, 2.4, .66], [20.0, 3.59, 2.5, .72], [17.5, .42, 2.3, .61],
+    [34.0, -1.4, 7.8, 1.5], [12.4, 5.8, 2.4, 3.8], [13.0, 12.6, 3.4, 4.2],
+    [18.7, 18.2, 4.9, 2.8], [28.0, 21.0, 5.8, 1.5], [34.0, 27.5, 4.8, 2.5],
+    [16.6, -9.4, 6.3, 1.8], [26.5, -10.8, 6.4, 1.8], [36.6, -12.3, 4.5, 2.4],
+    [6.9, -10.0, 2.0, 5.2], [8.6, -19.4, 2.7, 4.6], [-8.0, 11.1, 3.3, 4.0],
+  ]) {
+    for (let i = 0; i < 115; i++) {
+      const angle = patchRandom() * Math.PI * 2;
+      const radius = Math.sqrt(patchRandom());
+      const x = cx + Math.cos(angle) * radius * width;
+      const z = cz + Math.sin(angle) * radius * depth;
+      const y = groundAt(x, z);
+      if (laneDistance(x, z) < 1.16 || !canRoot(x, z, y) ||
+          Math.sin(x * 1.6 + z * .79) + Math.cos(z * 2.1 - x * .48) < -.95) continue;
+      const size = mix(.54, 1.38, patchRandom());
+      meadow.push([x, y - .035, z, patchRandom() * Math.PI * 2, size, size * mix(.72, 1.22, patchRandom()),
+        size, meadowTints[Math.floor(patchRandom() * meadowTints.length)]]);
+    }
+  }
+  for (const [cx, cz] of [[16.9, 3.42], [17.65, 3.7], [19.3, 3.78], [18.7, .2], [13.1, -.6], [11.3, 6.5], [11.0, -3.3],
+    [24.1, -.4], [28.4, 3.7], [33.4, -8.1], [8.5, -18.8], [-9.5, 4.8], [-23.0, -33.8]]) {
+    for (let i = 0; i < 5; i++) {
+      const angle = i * 2.39996 + patchRandom() * .55;
+      const radius = i * .29;
+      const x = cx + Math.cos(angle) * radius, z = cz + Math.sin(angle) * radius;
+      const y = groundAt(x, z);
+      if (laneDistance(x, z) < 1.5 || !canRoot(x, z, y)) continue;
+      azalea.push([x, y - .045, z, angle, mix(.64, 1.37, patchRandom())]);
+    }
+  }
+  return { grass, sedge, meadow, azalea };
 }

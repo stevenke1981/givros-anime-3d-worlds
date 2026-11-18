@@ -244,6 +244,7 @@ kbd { border: 1px solid var(--rule); border-radius: 3px; padding: 0 3px; margin-
   .scene-options { grid-template-columns: 1fr; }
   .toolbar { gap: 4px; }
   .toolbar button { padding-inline: 8px; }
+  .views button { padding-inline: 7px; }
 }
 
 @media (max-width: 359px) and (any-pointer: coarse) {

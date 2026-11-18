@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { paddyShape, mix, smooth } from '../layout.js';
+import { paddyShape, mix } from '../layout.js';
 import { randomSequence } from '../landscape.js';
+import { plantingKinds, plantingLOD, regionalPlantings, regionalPlantModels } from './planting.js';
 
 export async function loadRegionalAssets(layout, onProgress) {
   const {spec,buildings,crossings,dock,paddies} = layout;
   const names = new Set(['cedar','cedar-lod','bamboo','shrub','grass','torii','stone-lantern','rock','fence',
-    'stair-tread','stair-tread-b','stair-tread-c','retaining-wall',...spec.ecology.slice(0,2)]);
+    'stair-tread','stair-tread-b','stair-tread-c','retaining-wall',...spec.ecology.slice(0,2),
+    ...regionalPlantModels(layout.id)]);
   for (const building of buildings) names.add(building.model);
   for (const bridge of crossings) names.add(bridge.model);
   if (paddies.length) { names.add('rice'); names.add('river-sedge'); }
@@ -20,7 +22,8 @@ export async function loadRegionalAssets(layout, onProgress) {
   const loader = new GLTFLoader();
   let loaded=0;
   const loadedAssets = await Promise.all([...names].map(async name => {
-    const {scene} = await loader.loadAsync(`${import.meta.env.BASE_URL}models/${name}.glb`);
+    const model = name === 'cedar' || name === 'cedar-lod' ? 'ridge-' + name : name;
+    const {scene} = await loader.loadAsync(`${import.meta.env.BASE_URL}models/${model}.glb`);
     scene.updateMatrixWorld(true);
     const parts=[];
     scene.traverse(node=>{
@@ -41,7 +44,16 @@ function addInstances(group, parts, placement, castShadow, kind) {
     batch.name=part.name;
     batch.castShadow=castShadow;
     batch.receiveShadow=true;
-    if (kind) batch.userData.gaussianKind=kind;
+    const sourceName = part.userData.name ?? part.name;
+    const petals = /(?:flower petals|azalea flowers)/i.test(sourceName);
+    if (kind && /\b(?:foliage|leaves|leaf|needle sprays|mottled.*crown)\b/i.test(sourceName)) {
+      batch.userData.gaussianKind=kind;
+      if (kind === 'turf') batch.userData.gaussianSamples=4;
+    } else if (kind === 'shrub' && petals) {
+      batch.userData.gaussianKind='blossom';
+      batch.userData.gaussianSamples=12;
+      batch.userData.gaussianRadiusScale=.36;
+    }
     for (let i=0;i<placement.length;i++) {
       const [x,y,z,yaw,s,sY=s,sZ=s,tint]=placement[i];
       transform.position.set(x,y,z);
@@ -49,7 +61,7 @@ function addInstances(group, parts, placement, castShadow, kind) {
       transform.scale.set(s,sY,sZ);
       transform.updateMatrix();
       batch.setMatrixAt(i,matrix.multiplyMatrices(transform.matrix,part.matrixWorld));
-      if (tint) batch.setColorAt(i,tint);
+      if (tint && !petals) batch.setColorAt(i,tint);
     }
     batch.computeBoundingSphere();
     group.add(batch);
@@ -130,16 +142,24 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     }
   }
 
+  const planted = regionalPlantings(layout.id, layout, seed);
   const visited = [];
+  for (const {model,x,y,z,yaw,scale,stretch,tint,trunk} of planted) {
+    put(model,x,y,z,yaw,scale,scale*stretch,scale,new THREE.Color(tint));
+    if (trunk) {
+      visited.push([x,z]);
+      blocked.push([x,z,trunk]);
+    }
+  }
   const tints=['#e0efc6','#bdcda3','#d5d9ab','#dfe6ca','#e4eee3','#bcccbf'].map(hex=>new THREE.Color(hex));
   const autumn=['#e96952','#f59c5b','#f8c166','#e9874c','#d66b51','#e1b068'].map(hex=>new THREE.Color(hex));
   const [primary,secondary,density]=spec.ecology;
-  const reserveSanctuaryShot=spec.sanctuary.model==='temple' || spec.grove;
+  const reserveLandmarkShot=spec.sanctuary.model==='temple' || spec.grove || spec.pool;
   const [eyeX,,eyeZ]=spec.featured.position,[aimX,,aimZ]=spec.featured.target;
   const vx=aimX-eyeX,vz=aimZ-eyeZ;
   const shotLength=vx*vx+vz*vz;
-  function inSanctuaryShot(x,z) {
-    if (!reserveSanctuaryShot) return false;
+  function inLandmarkShot(x,z) {
+    if (!reserveLandmarkShot) return false;
     const t=Math.max(0,Math.min(1,((x-eyeX)*vx+(z-eyeZ)*vz)/shotLength));
     return Math.hypot(x-eyeX-t*vx,z-eyeZ-t*vz)<3.6;
   }
@@ -149,7 +169,7 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     const field=paddies.some(([a,b,rx,rz])=>paddyShape(x-a,z-b,rx+1,rz+1)<1.15);
     const rural=buildings.some(b=>Math.abs(b.x-x)<6.0&&Math.abs(b.z-z)<5.7);
     const clustered=Math.sin(x*.33-z*.16)+.82*Math.cos(x*.16+z*.43);
-    if (field || rural || inSanctuaryShot(x,z) || lane<2.15 || y<waterAt(x,z)+.22 || edge<1.8 || clustered<-.60 ||
+    if (field || rural || inLandmarkShot(x,z) || lane<2.15 || y<waterAt(x,z)+.22 || edge<1.8 || clustered<-.60 ||
         Math.hypot(x-spec.sanctuary.x,z-spec.sanctuary.z)<6.3) continue;
     if (Math.abs(z-stairs.start)<5&&Math.abs(x-stairs.x)<3.6) continue;
     if (visited.some(([a,b])=>(x-a)**2+(z-b)**2<2.38)) continue;
@@ -172,7 +192,7 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     for (let i=0;i<160;i++) {
       const x=mix(-15.5,7,rand()),z=mix(-25,17,rand());
       const [lane]=routeBlend(x,z);
-      if (lane<2.0 || lane>4.6 || riverEdge(x,z)<1.2 || inSanctuaryShot(x,z) ||
+      if (lane<2.0 || lane>4.6 || riverEdge(x,z)<1.2 || inLandmarkShot(x,z) ||
           Math.hypot(x-spec.gate[0],z-spec.gate[1])<3.1 ||
           visited.some(([a,b])=>(x-a)**2+(z-b)**2<1.8) ||
           buildings.some(b=>Math.abs(x-b.x)<4.9&&Math.abs(z-b.z)<4.5)) continue;
@@ -195,7 +215,7 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     const z=mix(-64,43,rand()),side=rand()<.5?-1:1;
     const x=layout.centerAt(z)+side*(layout.spanAt(z)+mix(-1.6,3,rand()));
     const y=groundAt(x,z);
-    if (routeBlend(x,z)[0]<1.76 || seaEdge(x,z)<-.75 ||
+    if (routeBlend(x,z)[0]<1.76 || seaEdge(x,z)<-.75 || blocks(x,z) ||
         crossings.some(b=>Math.abs(z-b.z)<3.1)) continue;
     const s=.13+.70*rand()**2,rockColor=spec.snow?tints[4]:paints[i%5];
     prop('rock',x,z,rand()*6.28,s,-.083,rockColor);
@@ -241,10 +261,12 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
   }
 
   const treeModels=new Set(['cedar','cedar-lod','maple','maple-lod','bamboo']);
+  const detailModels = new Set(regionalPlantModels(layout.id));
   for (const [name,positions] of groups) {
-    const kind=treeModels.has(name)?'tree':name==='shrub'?'shrub':undefined;
-    const cast=!['grass','rice','river-sedge','cedar-lod','maple-lod','stair-tread'].includes(name);
-    if (kind||name==='grass'||name==='rice') {
+    const kind=plantingKinds[name] ?? (treeModels.has(name)?'tree':name==='shrub'?'shrub':undefined);
+    const cast=!['grass','rice','river-sedge','meadow-grass','woodland-fern','seasonal-forbs','shore-reeds',
+      'cedar-lod','maple-lod','coastal-pine-lod','stair-tread'].includes(name);
+    if (kind||detailModels.has(name)||name==='grass'||name==='rice') {
       const chunks=new Map();
       for (const item of positions) {
         const cell=`${Math.floor(item[0]/28)},${Math.floor(item[2]/28)}`;
@@ -252,17 +274,17 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
         chunks.get(cell).push(item);
       }
       for (const chunk of chunks.values()) {
-        if (name!=='cedar' && name!=='maple') {
+        if (!Object.hasOwn(plantingLOD, name)) {
           addInstances(scene,assets[name],chunk,cast,kind);
           continue;
         }
         const [x,,z]=chunk[Math.floor(chunk.length/2)];
         const level=new THREE.LOD();
         level.position.set(x,0,z);
-        for (const [variant,distance] of [[name,0],[name+'-lod',name==='maple'?24:31]]) {
+        for (const [variant,distance] of [[name,0],[name+'-lod',plantingLOD[name]]]) {
           const batch=new THREE.Group();
           batch.position.set(-x,0,-z);
-          addInstances(batch,assets[variant],chunk,cast,kind);
+          addInstances(batch,assets[variant],chunk,distance===0 && cast,kind);
           level.addLevel(batch,distance,.11);
         }
         scene.add(level);

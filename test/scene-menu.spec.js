@@ -32,17 +32,25 @@ test('the release menu opens every world and each entrance supports walking', as
     await expect(explorer).toHaveAttribute('data-scene', scene.id, { timeout: 70_000 });
     await expect(explorer).toHaveAttribute('data-mode', 'scenic');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(scene.name);
-    await page.screenshot({ path: info.outputPath(scene.id + '-overview.png') });
-
-    const landmark = scene.id === '01' ? 'shrine' : 'landmark';
-    await page.locator('[data-view="' + landmark + '"]').click();
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    const counts = JSON.parse(await canvas.getAttribute('data-gaussian-counts'));
-    expect(Object.values(counts).reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(2100);
-    for (const [kind, count] of Object.entries(counts)) {
-      if (count > 0) visibleDetails.add(kind);
+    const trail = scene.id === '01' ? 'meadow' : 'trail';
+    await expect(page.locator(`[data-view="${trail}"]`)).toHaveAttribute('aria-pressed', 'true');
+    const regionalDetails = new Set();
+    for (const [view, label] of [[trail, 'trail'], ['overview', 'overview'], [scene.id === '01' ? 'shrine' : 'landmark', 'landmark']]) {
+      if (view !== trail) await page.locator(`[data-view="${view}"]`).click();
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const counts = JSON.parse(await canvas.getAttribute('data-gaussian-counts'));
+      expect(Object.values(counts).reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(2100);
+      for (const [kind, count] of Object.entries(counts)) {
+        if (count > 0) regionalDetails.add(kind);
+      }
+      await page.screenshot({ path: info.outputPath(scene.id + '-' + label + '.png') });
     }
-    await page.screenshot({ path: info.outputPath(scene.id + '-landmark.png') });
+    for (const kind of regionalDetails) visibleDetails.add(kind);
+    if (scene.id !== '01') {
+      for (const kind of ['turf', 'tree', 'mountain', 'shrub']) {
+        expect.soft(regionalDetails.has(kind), `${scene.name} ${kind}`).toBe(true);
+      }
+    }
     await page.getByRole('button', { name: '開始散步' }).click();
     await expect(explorer).toHaveAttribute('data-mode', 'walk');
     const origin = await canvas.getAttribute('data-walk-position');

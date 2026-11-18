@@ -4,16 +4,17 @@ import { mix, paddyShape, smooth } from '../layout.js';
 import { randomSequence } from '../landscape.js';
 
 function grid(w, h, sample, material) {
-  const positions = [], colors = [], covers = [], edges = [], indices = [];
+  const positions = [], colors = [], covers = [], edges = [], gaussianWeights = [], indices = [];
   for (let j=0;j<=h;j++) {
     for (let i=0;i<=w;i++) {
-      const [x,y,z,color,cover,edge] = sample(i/w,j/h);
+      const [x,y,z,color,cover,edge,gaussianWeight] = sample(i/w,j/h);
       positions.push(x,y,z);
       if (color) {
         colors.push(color.r,color.g,color.b);
         covers.push(...cover);
       }
       if (edge !== undefined) edges.push(edge);
+      if (gaussianWeight !== undefined) gaussianWeights.push(gaussianWeight);
       if (i===w || j===h) continue;
       const a=j*(w+1)+i,b=a+w+1;
       indices.push(a,b,a+1,a+1,b,b+1);
@@ -27,9 +28,33 @@ function grid(w, h, sample, material) {
     geometry.setAttribute('landCover',new THREE.Float32BufferAttribute(covers,3));
   }
   if (edges.length) geometry.setAttribute('wetEdge',new THREE.Float32BufferAttribute(edges,1));
+  if (gaussianWeights.length) geometry.setAttribute('gaussianWeight',new THREE.Float32BufferAttribute(gaussianWeights,1));
   geometry.computeVertexNormals();
   return new THREE.Mesh(geometry,material);
 }
+
+function field(x, z, seed) {
+  const ix = Math.floor(x), iz = Math.floor(z);
+  const u = smooth(0, 1, x - ix), v = smooth(0, 1, z - iz);
+  const point = (a, b) => {
+    const hash = Math.imul(a + seed, 1597334677) ^ Math.imul(b - seed, 3812015801);
+    return (Math.imul(hash ^ (hash >>> 16), 2246822519) >>> 0) / 4294967295;
+  };
+  return mix(mix(point(ix, iz), point(ix + 1, iz), u), mix(point(ix, iz + 1), point(ix + 1, iz + 1), u), v);
+}
+
+// [crest center, ridge width, gully depth, exposed rock height, distance haze]
+const ridgeProfiles = {
+  '02': [.39, .54, 4.1, 28, .18], // Wet dissected foothills
+  '03': [.45, .55, 3.1, 35, .21], // Soft, wooded saddles
+  '04': [.43, .64, 3.8, 34, .20], // Broad agricultural valley
+  '05': [.35, .56, 7.0, 29, .20], // Valleys carved into the autumn ridge
+  '06': [.36, .44, 12.5, 13, .17], // Exposed rock ribs above the temple
+  '07': [.34, .48, 9.7, 19, .22], // Steep snowfields with windswept spurs
+  '08': [.33, .63, 8.7, 18, .28], // A long shoulder falling into sea haze
+  '09': [.42, .67, 5.3, 31, .25], // Wide glacial basin
+  '10': [.39, .61, 5.0, 35, .24], // Blue-hour silhouette
+};
 
 const cloudNoise = `
 float hash(vec2 p) {return fract(sin(dot(p,vec2(139.47,243.43)))*41877.93);}
@@ -92,7 +117,8 @@ export function addAtmosphere(scene, layout) {
 }
 
 export function addTerrain(scene, layout) {
-  const {spec,paddies,groundAt,routeBlend,riverEdge,seaEdge} = layout;
+  const {id,spec,paddies,groundAt,routeBlend,riverEdge,seaEdge,waterAt} = layout;
+  const seed = 619 + Number(id) * 37;
   const tuple = spec.colors.map(color => new THREE.Color(color));
   const [grass,shade,dry,path] = tuple;
   const rock = new THREE.Color(spec.snow ? '#a2adb8' : spec.coast ? '#929385' : '#858981');
@@ -106,9 +132,12 @@ export function addTerrain(scene, layout) {
     }
     const x=map(u,-54,54),z=map(v,-62,45),y=groundAt(x,z);
     const [lane] = routeBlend(x,z);
-    const variation = .54+.23*Math.sin(x*.17+z*.22)+.14*Math.sin(z*.55+Math.cos(x*.2))+.08*Math.sin(x*1.2-z*.83);
+    const canopy = field(x * .14, z * .14, seed);
+    const litter = field(x * .46 + canopy, z * .42, seed + 11);
+    const variation = canopy * .67 + litter * .33;
     const color=shade.clone().lerp(grass,smooth(.14,.68,variation)).lerp(dry,.49*smooth(.56,.94,variation));
-    const banks=smooth(2.75,.7,Math.min(riverEdge(x,z),seaEdge(x,z))+.165*Math.sin(z*2.83+x*1.3));
+    const bankDistance = Math.min(riverEdge(x,z),seaEdge(x,z));
+    const banks=smooth(2.75,.7,bankDistance+.29*(litter-.5));
     color.lerp(rock,banks*.84);
     const wear=smooth(1.34,.66,lane+.10*Math.sin(x*1.79-z*2.14))*(1-banks*.65);
     color.lerp(path.clone().lerp(soil,.20+(1-variation)*.18),wear);
@@ -125,7 +154,15 @@ export function addTerrain(scene, layout) {
     color.lerp(rock,paved*.73);
     bare=Math.max(bare,paved*.82);
     stones=Math.max(stones,paved*.54);
-    return [x,y,z,color,[bare,stones,stones*.16]];
+    if (spec.snow) {
+      // Wind and foot traffic expose gravel in small irregular patches below the snow.
+      const exposed = (.14 + .86 * bare) * smooth(.48,.79,canopy * .42 + litter * .58);
+      color.lerp(rock,exposed * .85);
+      stones=Math.max(stones, exposed);
+    }
+    const dryLand = smooth(-.05,.40,bankDistance) * smooth(0,.16,y-waterAt(x,z));
+    const groundCover = (1 - bare) ** 1.7 * dryLand * (.62 + litter * .36);
+    return [x,y,z,color,[bare,stones,stones*.16],undefined,groundCover];
   },groundMaterial(turfDetail));
   turf.name='Continuous regional landforms and paths';
   turf.receiveShadow=true;
@@ -133,21 +170,29 @@ export function addTerrain(scene, layout) {
   scene.add(turf);
 
   const [height,width,z0] = spec.ridge;
+  const [ridgeCenter,ridgeWidth,gullyDepth,rockHeight,haze] = ridgeProfiles[id];
   for (let k=0;k<3;k++) {
-    const near=k===0, crestColor=rock.clone().lerp(tuple[4],near?.20:.54);
-    const forest=shade.clone().lerp(tuple[4],near?.24:.56);
+    const near=k===0, layerSeed=seed+k*23;
+    const crestColor=rock.clone().lerp(tuple[4],haze+k*.14);
+    const forest=shade.clone().lerp(tuple[4],haze+k*.16);
     const massif=grid(115,76,(u,v)=>{
-      const shift=k*.49 + spec.stream[0]*.018;
-      const x=(u-.5)*(width+k*56) + Math.sin(shift)*25;
+      const x=(u-.5)*(width+k*56) + Math.sin(layerSeed)*21;
       const z=z0+(v-.5)*(96+k*18)-k*53;
-      const y=-8+(height+k*9)*Math.sin(Math.PI*u)**.62 *
-        smooth(.59,.02,Math.abs(v-.40-.042*Math.sin(u*18+shift))) *
-        (.76+.12*Math.sin(u*12+shift)+.05*Math.sin(u*49+shift)+.025*Math.sin(u*103));
-      const striation=.50+.23*Math.sin(x*.41-z*.14)+.15*Math.sin(z*.73+x*.56);
-      const exposed=smooth(13,54,y)*striation;
+      const fold = field(u * 7, .5, layerSeed);
+      const crest = ridgeCenter + (fold - .5) * .13;
+      const flank = smooth(ridgeWidth,.018,Math.abs(v-crest) * (v<crest ? 1.24 : .81));
+      const saddle = field(u*13,.75,layerSeed+5);
+      const channels = field(x*.10+z*.064,z*.036,layerSeed+11);
+      const stone = field(x*.29+channels,z*.23,layerSeed+19);
+      const gullies = smooth(.57,.86,channels) * smooth(0,.45,Math.abs(v-crest));
+      const silhouette = Math.sin(Math.PI*u)**.66 * (.62+.27*fold+.17*saddle);
+      const y = -8 + flank * ((height+k*9)*silhouette - gullyDepth*gullies + (stone-.5)*2.6);
+      const exposed=smooth(rockHeight,rockHeight+30,y) * (.33+.67*channels);
       const color=forest.clone().lerp(crestColor,exposed*.96);
-      if (spec.snow) color.lerp(dry,smooth(18+striation*19,40+striation*26,y)*.94);
-      return [x,y,z,color,[exposed*.79,exposed,.78]];
+      color.multiplyScalar(.81 + .23 * channels + .14 * stone);
+      if (spec.snow) color.lerp(dry,smooth(16+channels*25,38+channels*24,y)*.92);
+      const detail = flank * smooth(2,26,y) * (.34 + exposed*.37 + gullies*.36) * (1-k*.18);
+      return [x,y,z,color,[exposed*.79,exposed,.78],undefined,detail];
     },groundMaterial(turfDetail,{roughness:1,emissive:tuple[4],emissiveIntensity:near?.065:.14}));
     massif.name='Weathered regional ridge '+k;
     massif.userData.gaussianKind='mountain';
