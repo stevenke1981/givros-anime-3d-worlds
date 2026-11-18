@@ -200,12 +200,13 @@ export function addTerrain(scene, layout) {
   }
 }
 
-function surfaceMaterial(clock, sun, spec, kind) {
+function surfaceMaterial(clock, sun, spec, kind, floodedSoil) {
   const still = kind==='sea' || kind==='lake';
   const drained = kind==='paddy' || kind==='pool';
   const colors = kind==='paddy' ? ['#5f785e','#92a276'] :
     kind==='pool' ? ['#557d82','#9fbaae'] : [spec.colors[7],spec.colors[8]];
   return new THREE.ShaderMaterial({
+    defines: floodedSoil ? { FLOODED_SOIL: 1 } : {},
     side:THREE.DoubleSide,
     uniforms:{clock:{value:clock.value},sun:{value:sun},deep:{value:new THREE.Color(colors[0])},
       shallows:{value:new THREE.Color(colors[1])},skyTint:{value:new THREE.Color(spec.colors[4])},
@@ -232,6 +233,16 @@ function surfaceMaterial(clock, sun, spec, kind) {
         tint=mix(tint,deep*.61,shadowBank*.82);
         vec3 body=mix(deep,shallows,.075+littoral*.67+m*.18);
         body=mix(body,tint,min(.82,reflection*(.16+glass*.93)));
+        #ifdef FLOODED_SOIL
+          float shelf=smoothstep(.62,1.,edge+.095*(grit-.5));
+          vec3 mud=mix(vec3(.085,.101,.058),vec3(.24,.197,.106),.20+m*.24+shelf*.48);
+          vec3 reflected=reflect(-eye,n);
+          float openSky=smoothstep(.015,.30,reflected.y);
+          float haze=smoothstep(.35,.74,noise(reflected.xz*6.+uv*.12));
+          vec3 sky=mix(vec3(.11,.17,.11),skyTint,openSky);
+          sky=mix(sky,vec3(.68,.74,.77),openSky*haze*.34);
+          body=mix(mud,sky,(.28+glass*.56)*(1.-shelf*.57));
+        #endif
         float sunlight=pow(max(0.,dot(reflect(-sun,n),eye)),117.)*(.30+m*.58);
         float glints=smoothstep(.86,.985,grit)*smoothstep(.19,.75,m);
         float foam=surf*smoothstep(.92,.998,edge)*smoothstep(.41,.73,m+cos(uv.y*1.8+uv.x*.22)*.16);
@@ -243,11 +254,11 @@ function surfaceMaterial(clock, sun, spec, kind) {
   });
 }
 
-export function addHydrology(scene, layout, sun) {
+export function addHydrology(scene, layout, sun, realisticMaterials = false) {
   const { spec,paddies,baseWaterAt,centerAt,spanAt,seaEdge }=layout;
   const clock={value:0};
-  function add(kind,w,h,point) {
-    const material=surfaceMaterial(clock,sun,spec,kind);
+  function add(kind,w,h,point,floodedSoil=false) {
+    const material=surfaceMaterial(clock,sun,spec,kind,realisticMaterials && floodedSoil);
     material.uniforms.clock=clock;
     const water=grid(w,h,point,material);
     water.name='Watershed '+kind;
@@ -276,7 +287,7 @@ export function addHydrology(scene, layout, sun) {
     const du=2*u-1,dv=2*v-1,edge=Math.max(Math.abs(du),Math.abs(dv));
     const scale=edge/(paddyShape(du,dv,1,1)||1)*.969;
     return [x+du*rx*scale,y,z+dv*rz*scale,null,null,edge];
-  });
+  },true);
   if (spec.pool) {
     const [x,z,y]=spec.pool;
     add('pool',22,22,(u,v)=>{

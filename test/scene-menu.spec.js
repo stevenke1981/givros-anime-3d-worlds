@@ -31,6 +31,7 @@ test('the release menu opens every world and each entrance supports walking', as
     if (scene.id !== '01') await chooseScene(page, scene.id);
     await expect(explorer).toHaveAttribute('data-scene', scene.id, { timeout: 70_000 });
     await expect(explorer).toHaveAttribute('data-mode', 'scenic');
+    await expect(explorer).toHaveAttribute('data-lighting', 'hdr-post');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText(scene.name);
     const trail = scene.id === '01' ? 'meadow' : 'trail';
     await expect(page.locator(`[data-view="${trail}"]`)).toHaveAttribute('aria-pressed', 'true');
@@ -105,13 +106,13 @@ test('a failed model preserves the retry message when a remaining model finishes
   await expect(explorer).toHaveAttribute('data-scene', '01', { timeout: 70_000 });
   let releaseModel;
   const pausedModel = new Promise((resolve) => { releaseModel = resolve; });
-  await page.route('**/models/onsen-pool.glb', async (route) => {
+  await page.route('**/models/baked/onsen-pool.glb', async (route) => {
     await pausedModel;
     await route.continue();
   });
-  await page.route('**/models/snow-inn.glb', (route) => route.fulfill({ status: 404 }));
+  await page.route('**/models/baked/snow-inn.glb', (route) => route.fulfill({ status: 404 }));
 
-  const remainingModel = page.waitForResponse('**/models/onsen-pool.glb');
+  const remainingModel = page.waitForResponse('**/models/baked/onsen-pool.glb');
   try {
     await chooseScene(page, '07');
     await expect(explorer).toHaveAttribute('data-state', 'error');
@@ -123,7 +124,7 @@ test('a failed model preserves the retry message when a remaining model finishes
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('status')).toContainText('無法載入「雪國溫泉山村」');
   await expect(explorer).toHaveAttribute('data-scene', '01');
-  await page.unroute('**/models/snow-inn.glb');
+  await page.unroute('**/models/baked/snow-inn.glb');
   await page.getByRole('button', { name: '重新載入' }).click();
   await expect(explorer).toHaveAttribute('data-scene', '07', { timeout: 70_000 });
 });
