@@ -22,6 +22,10 @@ export async function createRegionalWorld(id, {renderer,onProgress=()=>{}}={}) {
   const spawn={position:[x,surfaceAt(x,z)+1.65,z],target:spec.look};
   const views={overview:spec.overview,landmark:spec.featured,overlook:spec.overlook};
   const viewLabels={overview:'地形全景',landmark:spec.landmarkLabel,overlook:'山腰遠望'};
+  if (spec.grove) {
+    views.approach=spec.grove;
+    viewLabels.approach='竹徑參道';
+  }
   if (layout.dock) {
     const {x,y,z,r}=layout.dock;
     views.waterfront={
