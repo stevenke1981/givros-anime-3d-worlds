@@ -1,6 +1,7 @@
 import {
   MathUtils, NeutralToneMapping, PCFShadowMap, PerspectiveCamera, WebGLRenderer,
 } from 'three';
+import { createBlossomDetail } from './detail/blossom-splats.js';
 import { createSakuraWorld } from './world/sakura.js';
 import { advanceWalker, EYE_HEIGHT } from './walk.js';
 import './style.css';
@@ -20,6 +21,8 @@ const walkingKeys = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
 ]);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const options = new URLSearchParams(location.search);
+const traceWalk = options.has('trace-walk');
 const camera = new PerspectiveCamera(46, 1, 0.14, 700);
 camera.rotation.order = 'YXZ';
 
@@ -29,6 +32,7 @@ let drag;
 let renderer;
 let world;
 let failed = false;
+let updateBlossomDetail;
 let mode = 'scenic';
 let previousTime;
 let elapsed = 0;
@@ -87,7 +91,13 @@ function startWalk() {
   pointCamera(world.spawn);
   setMode('walk');
   place.textContent = '山村散步';
+  recordWalkPosition();
   canvas.focus({ preventScroll: true });
+}
+
+function recordWalkPosition() {
+  if (!traceWalk) return;
+  canvas.dataset.walkPosition = camera.position.toArray().map((value) => value.toFixed(4)).join(',');
 }
 
 function moveCamera(delta) {
@@ -114,7 +124,9 @@ function moveCamera(delta) {
   camera.position.y = Math.abs(previousY - eye) < 0.001
     ? eye
     : MathUtils.damp(previousY, eye, 18, delta);
-  return Boolean(turn || side || forward || camera.position.y !== previousY);
+  const changed = Boolean(turn || side || forward || camera.position.y !== previousY);
+  if (changed) recordWalkPosition();
+  return changed;
 }
 
 function drawFrame(time) {
@@ -127,6 +139,7 @@ function drawFrame(time) {
   }
   if (!needsDraw) return;
   world.update(elapsed, delta, reducedMotion.matches);
+  updateBlossomDetail?.(camera);
   renderer.render(world.scene, camera);
   needsDraw = false;
 }
@@ -224,6 +237,9 @@ async function load() {
   try {
     world = await createSakuraWorld({ renderer });
     if (failed) return;
+    if (options.get('splats') !== 'off') {
+      updateBlossomDetail = createBlossomDetail(world.scene);
+    }
     for (const button of viewButtons) {
       const available = Boolean(world.views[button.dataset.view]);
       button.hidden = !available;
@@ -231,6 +247,7 @@ async function load() {
     }
     showView('overview');
     world.update(0, 0, reducedMotion.matches);
+    updateBlossomDetail?.(camera);
     renderer.shadowMap.needsUpdate = true;
     renderer.render(world.scene, camera);
     start.disabled = false;
