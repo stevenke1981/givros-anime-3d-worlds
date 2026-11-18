@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#182d28">
-    <meta name="description" content="走過朱橋，沿溪谷田埂與竹徑探訪山腰神社。">
+    <meta name="description" content="走訪春櫻山村、竹林、梯田、溫泉與海岬漁村等十座 3D 場景。">
     <link rel="icon" href="data:,">
     <title>春櫻山村</title>
   </head>
@@ -12,30 +12,25 @@
     <main id="explorer" data-mode="scenic" data-state="loading">
       <canvas id="world" aria-label="春櫻山村即時 3D 場景" tabindex="-1"></canvas>
       <header class="identity">
-        <h1>春櫻山村</h1>
+        <h1 id="scene-name">春櫻山村</h1>
         <p id="place">山村全景</p>
       </header>
 
-      <button class="help-button" id="help" type="button" aria-haspopup="dialog">操作說明</button>
+      <div class="toolbar">
+        <button id="scene-menu" type="button" aria-haspopup="dialog">場景選單</button>
+        <button id="help" type="button" aria-haspopup="dialog">操作說明</button>
+      </div>
 
       <div id="notice" class="notice" role="status">正在載入山村…</div>
       <noscript><p class="notice">請開啟 JavaScript 後重新整理網頁。</p></noscript>
       <button class="retry" id="retry" type="button" hidden>重新載入</button>
 
-      <section class="welcome" aria-label="探索山村">
-        <p>走過朱橋，沿田埂和竹徑去山腰的神社。</p>
+      <section class="welcome" aria-label="探索場景">
+        <p id="scene-description">走過朱橋，沿田埂和竹徑去山腰的神社。</p>
         <button id="start" class="primary" type="button" disabled>開始散步 <span aria-hidden="true">↗</span></button>
       </section>
 
-      <nav class="views" aria-label="觀景位置">
-        <button type="button" data-view="overview" aria-pressed="true" disabled>全景</button>
-        <button type="button" data-view="bridge" aria-pressed="false" disabled>朱橋</button>
-        <button type="button" data-view="village" aria-pressed="false" disabled hidden>村落</button>
-        <button type="button" data-view="fields" aria-pressed="false" disabled hidden>水田</button>
-        <button type="button" data-view="shrine" aria-pressed="false" disabled>神社</button>
-        <button type="button" data-view="forest" aria-pressed="false" disabled hidden>竹徑</button>
-        <button type="button" data-view="overlook" aria-pressed="false" disabled hidden>山腰</button>
-      </nav>
+      <nav class="views" aria-label="觀景位置" hidden></nav>
 
       <section class="walking" aria-label="散步控制" hidden>
         <p class="walk-hint">WASD 移動 · 拖曳環顧 · Esc 回全景</p>
@@ -51,6 +46,14 @@
         </div>
       </section>
 
+      <dialog id="scene-dialog" class="scene-dialog" aria-labelledby="scene-title">
+        <form method="dialog" class="dialog-heading">
+          <h2 id="scene-title">選擇場景</h2>
+          <button type="submit" autofocus>關閉</button>
+        </form>
+        <div id="scene-options" class="scene-options"></div>
+      </dialog>
+
       <dialog id="help-dialog" aria-labelledby="help-title">
         <form method="dialog" class="dialog-heading">
           <h2 id="help-title">操作說明</h2>
@@ -62,7 +65,7 @@
           <dt>手機與平板</dt>
           <dd>按住方向按鈕移動，拖曳畫面環顧。</dd>
           <dt>想換個角度</dt>
-          <dd>選擇下方的景點。散步時按 <kbd>Esc</kbd> 可回全景，也可隨時回入口。</dd>
+          <dd>選擇下方的景點，或從「場景選單」前往另一處。散步時按 <kbd>Esc</kbd> 可回全景，也可隨時回入口。</dd>
         </dl>
       </dialog>
     </main>

@@ -93,6 +93,7 @@ export function addTerrain(scene, detail) {
   }, groundMaterial(detail, { roughness: .96 }));
   turf.receiveShadow = true;
   turf.name = 'Sculpted river valley and earth terraces';
+  turf.userData.gaussianKind = 'turf';
   scene.add(turf);
 }
 
@@ -130,6 +131,7 @@ export function addMountains(scene, detail) {
       return [x, y, z, color, [exposure * .8, exposure, .68 + exposure * .25]];
     }, groundMaterial(detail, { roughness: 1, emissive: shade, emissiveIntensity: layer === 0 ? .13 : .07 }));
     mesh.name = ['Far blue ridgeline', 'Middle forest ridgeline', 'Mountainside with exposed rock ribs'][layer];
+    mesh.userData.gaussianKind = 'mountain';
     scene.add(mesh);
   });
 }

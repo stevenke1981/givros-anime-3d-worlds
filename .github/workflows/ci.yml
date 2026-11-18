@@ -29,6 +29,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: python art/verify_sakura.py
+      - run: python art/verify_regions.py
       - run: npm run build
       - if: runner.os == 'Linux'
         run: npx playwright install --with-deps chromium

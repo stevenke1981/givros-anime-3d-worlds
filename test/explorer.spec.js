@@ -103,6 +103,12 @@ test('a touch viewport exposes walking controls and keeps navigation usable', as
     await expect(page.getByRole('button', { name: '向前' })).toBeVisible();
     await page.getByRole('button', { name: '回全景' }).tap();
     await expect(explorer).toHaveAttribute('data-mode', 'scenic');
+    await page.getByRole('button', { name: '場景選單' }).tap();
+    const sceneMenu = page.getByRole('dialog', { name: '選擇場景' });
+    await expect(sceneMenu.locator('[data-scene-choice]')).toHaveCount(10);
+    await sceneMenu.locator('[data-scene-choice="07"]').tap();
+    await expect(explorer).toHaveAttribute('data-scene', '07', { timeout: 70_000 });
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('雪國溫泉山村');
   } finally {
     await context.close();
   }

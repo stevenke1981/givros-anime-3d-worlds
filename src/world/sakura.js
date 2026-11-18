@@ -11,7 +11,7 @@ import { plantUnderstory } from './understory.js';
 const assetNames = [
   'house', 'bridge', 'torii', 'shrine', 'sakura', 'cedar', 'cedar-lod',
   'stone-lantern', 'rock', 'bamboo', 'rice', 'fence', 'stair-tread', 'stair-tread-b', 'stair-tread-c',
-  'grass', 'river-sedge'
+  'grass', 'river-sedge', 'shrub'
 ];
 
 async function loadAssets(onProgress) {
@@ -31,7 +31,7 @@ async function loadAssets(onProgress) {
   return Object.fromEntries(assets);
 }
 
-function batchAsset(scene, parts, placements, { castShadow = true, receiveShadow = true, assetId } = {}) {
+function batchAsset(scene, parts, placements, { castShadow = true, receiveShadow = true, assetId, gaussianKind } = {}) {
   if (!placements.length) return;
   const matrix = new THREE.Matrix4();
   const transform = new THREE.Object3D();
@@ -39,6 +39,9 @@ function batchAsset(scene, parts, placements, { castShadow = true, receiveShadow
     const instances = new THREE.InstancedMesh(part.geometry, part.material, placements.length);
     instances.name = part.name;
     if (assetId) instances.userData.assetId = assetId;
+    if (gaussianKind && (gaussianKind === 'shrub' || /foliage|leaves|plume|spray/i.test(part.name + part.material.name))) {
+      instances.userData.gaussianKind = gaussianKind;
+    }
     instances.castShadow = castShadow;
     instances.receiveShadow = receiveShadow;
     for (const [i, [x, y, z, rotation, sx, sy = sx, sz = sx, color]] of placements.entries()) {
@@ -177,7 +180,7 @@ function populate(scene, assets) {
     }
     for (const trees of groves.values()) {
       if (!shadow) {
-        batchAsset(scene, assets['cedar-lod'], trees, { castShadow: false, receiveShadow: false });
+        batchAsset(scene, assets['cedar-lod'], trees, { castShadow: false, receiveShadow: false, gaussianKind: 'tree' });
         continue;
       }
       const centerX = trees.reduce((sum, tree) => sum + tree[0], 0) / trees.length;
@@ -188,7 +191,7 @@ function populate(scene, assets) {
       for (const [model, distance] of [['cedar', 0], ['cedar-lod', 33]]) {
         const level = new THREE.Group();
         level.position.copy(grove.position).negate();
-        batchAsset(level, assets[model], trees);
+        batchAsset(level, assets[model], trees, { gaussianKind: 'tree' });
         grove.addLevel(level, distance, .12);
       }
       scene.add(grove);
@@ -199,6 +202,22 @@ function populate(scene, assets) {
   batchAsset(scene, assets.rice, rice, { castShadow: false });
   batchAsset(scene, assets.fence, fences);
   batchAsset(scene, assets['stone-lantern'], lanterns);
+
+  const shrubPlacements = [];
+  const shrubRand = randomSequence(863517);
+  for (const [cx, cz] of [[10, 23], [-9, 8], [-21, -32], [-28, -43], [20, 2], [-41, -22], [37, 18]]) {
+    for (let sample = 0; sample < 15; sample += 1) {
+      const x = cx + (shrubRand() - .5) * 10;
+      const z = cz + (shrubRand() - .5) * 10;
+      if (laneDistance(x,z) < 2.25 || blocked(x,z) || !canWalk(x,z)
+        || Math.abs(x - riverCenter(z)) < riverWidth(z) + .95
+        || paddies.some(([px, pz, rx, rz]) => paddyShape(x - px,z - pz,rx,rz) < 1.35)) continue;
+      const size = mix(.53, 1.12, shrubRand());
+      shrubPlacements.push([x, groundAt(x,z), z, shrubRand() * Math.PI * 2, size]);
+      hitCircles.push([x,z,.45 * size]);
+    }
+  }
+  batchAsset(scene, assets.shrub, shrubPlacements, { gaussianKind: 'shrub' });
 
   const { grass, sedge } = plantUnderstory();
   for (const [species, plants] of [['grass', grass], ['river-sedge', sedge]]) {

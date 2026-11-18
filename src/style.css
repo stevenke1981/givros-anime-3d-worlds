@@ -83,7 +83,15 @@ button:not(:disabled):hover { background: #29483e; }
 button:focus-visible { outline: 2px solid #ffcfb9; outline-offset: 3px; }
 button:disabled { cursor: default; opacity: .6; }
 
-.help-button { position: absolute; inset: var(--top) var(--right) auto auto; }
+.toolbar {
+  position: absolute;
+  inset: var(--top) var(--right) auto auto;
+  display: flex;
+  gap: 6px;
+}
+
+.toolbar #scene-menu { background: #f4d6b9; color: #302218; border-color: #f4d6b9; }
+.toolbar #scene-menu:not(:disabled):hover { background: #ffe4c8; }
 
 .welcome {
   position: absolute;
@@ -163,6 +171,8 @@ button:disabled { cursor: default; opacity: .6; }
 #explorer[data-state="error"] .welcome,
 #explorer[data-state="error"] .views,
 #explorer[data-state="error"] .walking { display: none; }
+#explorer[data-state="loading"] .views,
+#explorer[data-state="loading"] .welcome { visibility: hidden; }
 
 dialog {
   width: min(430px, calc(100% - 32px));
@@ -178,6 +188,24 @@ dialog {
 dialog::backdrop { background: #061a15a8; }
 .dialog-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .dialog-heading h2 { margin: 0; font-size: 1.24rem; }
+.scene-dialog { width: min(640px, calc(100% - 32px)); }
+.scene-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 14px;
+}
+.scene-options button {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 11px;
+  text-align: left;
+  white-space: normal;
+}
+.scene-options button[aria-current="true"] { border-color: #f4d6b9; background: #3c4940; }
+.scene-options strong { font-size: 1rem; }
+.scene-options span { font-size: .8rem; font-weight: 400; line-height: 1.45; color: #ece3d5; }
 dialog dl { margin: 0; }
 dialog dt { margin-top: 16px; font-weight: 700; }
 dialog dd { margin: 5px 0 0; font-size: .9rem; line-height: 1.7; color: #ece3d5; }
@@ -205,10 +233,17 @@ kbd { border: 1px solid var(--rule); border-radius: 3px; padding: 0 3px; margin-
     --bottom: max(14px, env(safe-area-inset-bottom));
   }
   .identity { padding: 7px 10px 8px; }
+  .identity { max-width: calc(100% - 188px); }
   .welcome { gap: 9px; padding: 11px 12px; bottom: calc(var(--bottom) + 61px); }
   .views button { padding-inline: 9px; }
   .walk-actions button { padding-inline: 10px; }
   .walk-hint { bottom: calc(var(--bottom) + 52px); }
+}
+
+@media (max-width: 430px) {
+  .scene-options { grid-template-columns: 1fr; }
+  .toolbar { gap: 4px; }
+  .toolbar button { padding-inline: 8px; }
 }
 
 @media (max-width: 359px) and (any-pointer: coarse) {
