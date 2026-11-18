@@ -1,6 +1,6 @@
 # Regional village asset library
 
-Open [region-library.blend](region-library.blend) in Blender 5.2.1 and select a named scene from the scene picker. The geometry is separated into editable construction assemblies. Use Material Preview to see the embedded weathering maps and relief. The [contact sheet](region-assets.png) shows all thirteen shipped GLBs reimported into Blender.
+Open [region-library.blend](region-library.blend) in Blender 5.2.1 and select a named scene from the scene picker. The geometry is separated into editable construction assemblies. Use Material Preview to see the embedded weathering maps and relief. The [contact sheet](region-assets.png) shows all sixteen shipped GLBs reimported into Blender.
 
 The models use meters and exporter Y up. GLB fronts face +Z, corresponding to −Y in the Blender source. All anchors are (0, 0, 0). For the dock and fishing boat, the zero elevation represents the deck and waterline respectively.
 
@@ -18,7 +18,10 @@ The models use meters and exporter Y up. GLB fronts face +Z, corresponding to �
 | festival-stall.glb | 3.00 × 2.62 × 2.10 | 3,354 | Selling counter +Z. Timber base, folded two-tone canopy, hanging cloth panels, plates and skewer wares. |
 | festival-lantern.glb | 0.56 × 0.90 × 0.56 | 2,278 | Anchor at the tassel base. Hanging loop near Y=0.90. Ribbed washi includes gentle emissive material. |
 | maple.glb | 6.63 × 7.43 × 6.28 | 21,200 | Anchor at trunk root. Seeded branching and folded maple leaves over irregular underside sprays. |
+| maple-lod.glb | 6.54 × 7.30 × 6.38 | 6,656 | Distant maple with identical branch positions and simplified, enlarged leaves. |
 | shrub.glb | 1.98 × 0.95 × 1.96 | 2,398 | Anchor at ground. Basal forks carry varied folded broadleaf sprays. |
+| teahouse.glb | 9.31 × 5.61 × 7.35 | 25,162 | House envelope and 8 × 6 m body. Front +Z has an open veranda, indigo noren, serving counter, tea bowls, kettle and shelves. |
+| water-basin.glb | 1.83 × 1.26 × 1.16 | 1,320 | Stone footings at Y=0, rim about Y=0.69, water Y=0.543. Bamboo spout, stream and ladle are modeled. Access from +Z. |
 
 The game supplies colliders and water. The model files contain no animation. Weathering maps are embedded and have no external image dependencies.
 
@@ -32,7 +35,7 @@ Use Blender 5.2.1. From the repository root in PowerShell, substitute your Blend
 
 [region_build.py](region_build.py) uses separate construction functions per asset. Planks, peg rails and chipped ashlar are reused across waterfront and terrace assets. The winter inn reuses the proven house assembly and spans a modeled snow sheet along the common curved eave. The temple adds a second, compact kawara assembly above the shared hall frame. The vegetation builders place repeated leaf and branch forms through a deterministic seed.
 
-The verifier reads the produced GLBs. It tests root transforms, bounds, triangle indices, vertex paint and normalized normals. It also checks dock and bridge deck elevations, pool and sluice opening clearances, lantern emission and the absence of external image references. The contact sheet renders the exported geometry and vertex paint through Workbench.
+The verifier reads the produced GLBs. It tests root transforms, bounds, triangle indices, vertex paint and normalized normals. It also checks dock and bridge deck elevations, pool and sluice clearances, teahouse storefront sightlines, basin water heights, lantern emission and the absence of external image references. The contact sheet renders the exported geometry and vertex paint through Workbench.
 
 ## Provenance
 

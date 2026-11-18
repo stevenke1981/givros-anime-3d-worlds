@@ -410,7 +410,9 @@ def shaped_leaf(mesh, center, azimuth, size, outline, paint, accent, tilt):
              [accent if i % 6 == 0 else paint for i in range(n)])
 
 
-def maple():
+def maple(distant=False):
+    # Both resolutions must grow their branch skeleton from exactly the same random stream.
+    RNG.seed(281112)
     wood = Mesh("Flared maple trunk, exposed roots and fine palmate branches", TIMBER, smooth=True)
     leaf = Mesh("Palmatifid maple and mottled red-orange crown", LEAVES, smooth=True)
     trunk = [(0, 0, 0), (-0.05, 0.04, 0.35), (-0.13, 0.13, 1.16), (0.10, 0.06, 2.14),
@@ -440,15 +442,20 @@ def maple():
             wood.stem([root, root.lerp(tip, 0.54), tip], [0.027, 0.016, 0.003],
                       CEDAR_WOOD[1 if fork % 2 else 3], 5)
             paint = MAPLE[1 + (arm + fork) % 4:3 + (arm + fork) % 4]
-            cedar_bough(leaf, root - Vector((0, 0, 0.05)), tip, 0.38, 0.15, paint, simple=True)
+            cedar_bough(leaf, root - Vector((0, 0, 0.05)), tip,
+                        0.41 if distant else 0.38, 0.17 if distant else 0.15, paint, simple=True)
             for i in range(14):
                 angle = a0 + i * 2.40 + RNG.uniform(-0.25, 0.25)
                 radius = RNG.uniform(0.08, 0.54)
                 center = root.lerp(tip, RNG.uniform(0.30, 1.02)) + Vector(
                     (cos(angle) * radius, sin(angle) * radius, RNG.uniform(-0.11, 0.27)))
                 tone = RNG.choice(MAPLE[2:6])
-                shaped_leaf(leaf, center, angle, RNG.uniform(0.105, 0.209), MAPLE_OUTLINE,
-                            tone, RNG.choice(paint), RNG.uniform(-1.15, 1.25))
+                size, accent, tilt = RNG.uniform(0.105, 0.209), RNG.choice(paint), RNG.uniform(-1.15, 1.25)
+                if not distant:
+                    shaped_leaf(leaf, center, angle, size, MAPLE_OUTLINE, tone, accent, tilt)
+                elif i in {0, 3, 6, 10}:
+                    outline = tuple(MAPLE_OUTLINE[j] for j in (0, 2, 4, 5, 8, 11, 12, 14, 16))
+                    shaped_leaf(leaf, center, angle, size * 1.36, outline, tone, accent, tilt)
     for assembly in (wood, leaf):
         assembly.vertices = [(1.06 * x, 1.06 * y, 1.13 * z) for x, y, z in assembly.vertices]
     return [wood, leaf]
@@ -508,6 +515,131 @@ def fishing_rack():
     return [wood, net]
 
 
+def teahouse():
+    pieces = building()
+    for group in pieces:
+        # Keep the timber frame and transom while opening both central door bays.
+        retained = [(face, shade) for face, shade in zip(group.faces, group.colors)
+                    if not all(abs(group.vertices[i][0]) < 1.97
+                               and -3.28 < group.vertices[i][1] < -2.84
+                               and 0.408 < group.vertices[i][2] < 2.58 for i in face)]
+        remap = sorted({i for face, _ in retained for i in face})
+        compact = {old: new for new, old in enumerate(remap)}
+        group.vertices = [group.vertices[i] for i in remap]
+        group.faces = [tuple(compact[i] for i in face) for face, _ in retained]
+        group.colors = [shade for _, shade in retained]
+    furnishings = Mesh("Tongue-and-groove veranda, serving counter, bench and tea shelves", TIMBER)
+    fabric = Mesh("Indented indigo noren with sewn tea-leaf emblems", LEAVES)
+    ware = Mesh("Glazed tea bowls, clay kettle and handled bamboo tray", SATIN)
+    indigo = palette("2c4553 375564 466777 bdac87 f0e1ba")
+    ceramic = palette("6d8276 92a392 b0af92 9a7660 c7ae7b 424d48")
+    for i in range(24):
+        x = -2.40 + (i + 0.5) * 4.80 / 24
+        furnishings.box((x, -3.04, 0.388), (0.195, 1.07, 0.068), WOOD[(i + 1) % 3], 0.009)
+    for x in (-1.97, 1.97):
+        furnishings.beam((x, -3.52, 0.28), (x, -2.50, 0.28), 0.11, 0.12, WOOD[0])
+    for i in range(13):
+        x = -1.56 + (i + 0.5) * 2.61 / 13
+        furnishings.box((x, -2.59, 0.76), (0.197, 0.13, 0.65), WOOD[2 + i % 2], 0.023)
+    for x in (-1.57, 1.06):
+        furnishings.box((x, -2.41, 0.77), (0.14, 0.53, 0.76), WOOD[1])
+    furnishings.box((-0.25, -2.39, 1.13), (2.84, 0.73, 0.09), WOOD[3], 0.032)
+    furnishings.box((2.69, -3.23, 0.61), (1.15, 0.47, 0.081), WOOD[2], 0.018)
+    for x in (2.23, 3.15):
+        furnishings.box((x, -3.23, 0.43), (0.115, 0.21, 0.32), WOOD[0])
+    furnishings.box((-1.12, -0.92, 1.29), (2.69, 0.11, 1.76), WOOD[4])
+    for z in (0.73, 1.30, 1.91):
+        furnishings.box((-1.12, -1.15, z), (2.64, 0.48, 0.075), WOOD[2])
+        for i in range(5):
+            x = -2.17 + 0.47 * i
+            ware.stem([(x, -1.27, z + 0.03), (x, -1.27, z + 0.09), (x, -1.27, z + 0.16)],
+                      [0.063, 0.079, 0.070], ceramic[(i + round(z * 10)) % 4], 11)
+    furnishings.stem([(-2.02, -3.112, 2.63), (2.02, -3.112, 2.63)], [0.039, 0.039], WOOD[0], 9)
+    for i in range(5):
+        a = -1.94 + i * 0.782
+        rows = []
+        for t in (0, 0.19, 0.40, 0.70, 1.0):
+            rows.append([(a + w * 0.742, -3.11 - (0.027 + 0.022 * t) * sin(w * 10 + i),
+                          2.60 - t * 0.54 - 0.010 * sin(w * 13 + i) * t)
+                         for w in (0, 0.17, 0.33, 0.5, 0.67, 0.83, 1)])
+        fabric.rings(rows, indigo[i % 3], caps=False, wrap=False)
+        fabric.beam((a + 0.052, -3.19, 2.10), (a + 0.686, -3.19, 2.10),
+                    0.014, 0.015, indigo[3], 0.002)
+        mid = a + 0.372
+        for side in (-1, 1):
+            fabric.add([(mid, -3.174, 2.24), (mid + side * 0.052, -3.177, 2.33),
+                        (mid + side * 0.148, -3.178, 2.39), (mid + side * 0.095, -3.175, 2.26)],
+                       [(0, 1, 2, 3)], indigo[4])
+    kettle = (-0.89, -2.44, 1.32)
+    ware.volume(kettle, (0.16, 0.15, 0.148), ceramic[3], 12, 4, 0.057)
+    ware.stem([(-0.90, -2.45, 1.46), (-0.90, -2.45, 1.515)],
+              [0.091, 0.037], ceramic[5], 11)
+    ware.stem([(-0.78, -2.56, 1.35), (-0.69, -2.60, 1.39), (-0.65, -2.62, 1.49)],
+              [0.05, 0.037, 0.025], ceramic[3], 8)
+    handle = [(-0.89 + 0.082 * cos(j * pi / 10), -2.43, 1.44 + 0.163 * sin(j * pi / 10))
+              for j in range(11)]
+    ware.stem(handle, [0.014] * len(handle), WOOD[4], 7)
+    furnishings.box((0.17, -2.55, 1.188), (0.83, 0.41, 0.035), WOOD[1], 0.022)
+    for i in range(3):
+        x = -0.09 + 0.24 * i
+        ware.stem([(x, -2.55, 1.204), (x, -2.55, 1.24), (x, -2.55, 1.30),
+                   (x, -2.55, 1.30), (x, -2.55, 1.24)],
+                  [0.060, 0.076, 0.090, 0.076, 0.056], ceramic[i], 13)
+    return [*(piece for piece in pieces if piece.faces), furnishings, fabric, ware]
+
+
+def water_basin():
+    masonry = Mesh("Weathered granite footings, rolled stone lip and carved trough", MASONRY)
+    bamboo = Mesh("Hollow cut bamboo spout, tied supports and serving ladle", TIMBER)
+    water_finish = material("Basin | reflective clear blue water", 0.15, double_sided=True)
+    shader = water_finish.node_tree.nodes.get("Principled BSDF")
+    shader.inputs["Coat Weight"].default_value = 0.45
+    water = Mesh("Trough surface, lip ripples and continuous falling stream", water_finish, smooth=True)
+    for x in (-0.57, 0.57):
+        chipped_ashlar(masonry, ((x - 0.29, x + 0.29), (-0.40, 0.40)),
+                       ((0, 0.027), (0.043, 0), (0.18, 0.012), (0.22, 0.035)),
+                       STONE_MOSS[0], RNG, 0.021)
+    rim = [(-0.84, -0.42), (-0.67, -0.53), (-0.03, -0.55), (0.61, -0.51), (0.87, -0.41),
+           (0.91, 0.12), (0.85, 0.39), (0.65, 0.52), (-0.04, 0.55), (-0.64, 0.50),
+           (-0.86, 0.35), (-0.92, -0.03)]
+    profile = ((0.81, 0.197), (0.92, 0.26), (1, 0.40), (1.0, 0.63), (0.965, 0.689),
+               (0.819, 0.679), (0.758, 0.638), (0.718, 0.434), (0.64, 0.391))
+    masonry.rings([[(x * scale, y * scale, z + 0.008 * sin(i * 3) * (1 if index > 1 else 0))
+                    for i, (x, y) in enumerate(rim)]
+                   for index, (scale, z) in enumerate(profile)], STONE_MOSS[1])
+    reflection = palette("547d7b 6b9290 86aaa4 b4ccc0")
+    for scale, z in ((0.744, 0.543),):
+        vertices = [(0, 0, z), *((x * scale, y * scale, z) for x, y in rim)]
+        n = len(rim)
+        water.add(vertices, [(0, (i + 1) % n + 1, i + 1) for i in range(n)], reflection[1])
+    for i in range(3):
+        a, b = 0.066 + i * 0.057, 0.073 + i * 0.060
+        water.rings([[(0.33 + cos(k * pi / 12) * r, -0.06 + sin(k * pi / 12) * r,
+                       0.546 + 0.0012 * sin(k * pi / 5)) for k in range(24)] for r in (a, b)],
+                    reflection[2], caps=False)
+    pole = palette("667454 8a904f 9b9a60 b4a773 57543c")
+    for x in (0.32, 0.69):
+        bamboo.stem([(x, 0.43, 0.19), (x - 0.021, 0.47, 0.74), (x - 0.074, 0.47, 1.207)],
+                    [0.062, 0.053, 0.043], pole[1], 12)
+        for z in (0.63, 1.006):
+            bamboo.stem([(x - 0.018, 0.468, z), (x - 0.020, 0.468, z + 0.019)],
+                        [0.059, 0.059], pole[4], 12)
+    bamboo.stem([(0.24, 0.49, 1.12), (0.77, 0.49, 1.10)], [0.041, 0.043], pole[3], 10)
+    nozzle = ((0.343, 0.58, 1.203, 0.062), (0.338, 0.302, 1.107, 0.057),
+              (0.33, -0.055, 0.95, 0.055), (0.33, -0.064, 0.947, 0.039),
+              (0.33, 0.015, 0.980, 0.037))
+    bamboo.rings([[(x + r * cos(j * pi / 8), y - 0.37 * r * sin(j * pi / 8), z + 0.93 * r * sin(j * pi / 8))
+                   for j in range(16)] for x, y, z, r in nozzle], pole[2], caps=False)
+    water.stem([(0.33, -0.064, 0.932), (0.33, -0.087, 0.862), (0.331, -0.092, 0.72),
+                (0.33, -0.090, 0.54)], [0.015, 0.013, 0.010, 0.014], reflection[3], 8)
+    bamboo.stem([(-0.53, -0.39, 0.711), (-0.35, -0.21, 0.724), (-0.12, 0.16, 0.739)],
+                [0.017, 0.015, 0.014], pole[3], 8)
+    bamboo.stem([(-0.60, -0.45, 0.675), (-0.60, -0.45, 0.695), (-0.60, -0.45, 0.75),
+                 (-0.60, -0.45, 0.75), (-0.60, -0.45, 0.696)],
+                [0.069, 0.106, 0.111, 0.089, 0.067], pole[3], 16)
+    return [masonry, bamboo, water]
+
+
 DESIGNS = {
     "dock": dock,
     "plank-bridge": plank_bridge,
@@ -522,6 +654,9 @@ DESIGNS = {
     "maple": maple,
     "shrub": shrub,
     "fishing-rack": fishing_rack,
+    "teahouse": teahouse,
+    "water-basin": water_basin,
+    "maple-lod": lambda: maple(distant=True),
 }
 
 
