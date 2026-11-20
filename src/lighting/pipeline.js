@@ -97,11 +97,7 @@ export function createLightingPipeline(renderer, { legacy = false, coarse = fals
     }
 
     if (!target) {
-      const gl = renderer.getContext();
-      const samples = coarse ? 0 : gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES)
-        .find(count => count <= 4) ?? 0;
       target = new WebGLRenderTarget(1, 1, {
-        samples,
         type: HalfFloatType,
         minFilter: LinearFilter,
         magFilter: LinearFilter,
@@ -159,8 +155,13 @@ export function createLightingPipeline(renderer, { legacy = false, coarse = fals
             float spanX = abs(luma(east) - luma(west));
             float spanY = abs(luma(north) - luma(south));
             float edge = max(spanX, spanY);
-            float edgeAA = smoothstep(.10, .45, edge / max(.25, luma(center.rgb))) * .20;
+            float centerLuma = luma(center.rgb);
+            // Isolated blades and fine branches can fall between two similar
+            // neighbours. Reuse the existing taps to filter subpixel coverage.
+            float subpixel = abs(centerLuma - luma(average));
+            float edgeAA = smoothstep(.10, .48, max(edge, subpixel) / max(.20, centerLuma)) * .33;
             vec3 across = mix(alongX, alongY, smoothstep(-.05, .05, spanY - spanX));
+            across = mix(across, average, smoothstep(.05, .22, subpixel - edge));
             vec3 color = mix(center.rgb, across, edgeAA);
             color += clamp(center.rgb - average, -.14, .14) *
               contrastStrength * (1. - smoothstep(.10, .36, edge));

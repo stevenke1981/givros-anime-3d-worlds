@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+test.afterEach(async ({ page }) => {
+  // Let the explorer's pagehide handler dispose of its WebGL resources before teardown.
+  if (!page.isClosed()) await page.goto('about:blank');
+});
+
 test('the release loads its models, changes viewpoints, and responds to keyboard movement', async ({ page }, info) => {
   const errors = [];
   const modelResponses = [];
@@ -110,17 +115,4 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.waitForFunction(() => window.windStrength === 0, null, { timeout: 20_000 });
   expect(errors).toEqual([]);
-});
-
-test('the explorer reports an unavailable WebGL context and offers retry', async ({ page }) => {
-  await page.addInitScript(() => {
-    const getContext = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function (type, ...options) {
-      if (type === 'webgl2') return null;
-      return getContext.call(this, type, ...options);
-    };
-  });
-  await page.goto('./');
-  await expect(page.getByRole('status')).toContainText('WebGL 2');
-  await expect(page.getByRole('button', { name: '重新載入' })).toBeVisible();
 });

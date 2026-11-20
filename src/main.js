@@ -409,6 +409,7 @@ function boot() {
     if (world) disposeWorld(world);
     lighting.dispose();
     renderer.dispose();
+    renderer.forceContextLoss();
   });
   canvas.addEventListener('webglcontextlost', () => {
     showFailure('3D 繪圖已中斷，請重新載入頁面。');

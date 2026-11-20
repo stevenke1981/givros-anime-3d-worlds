@@ -6,7 +6,8 @@ export default defineConfig({
   workers: 1,
   timeout: 90_000,
   projects: [
-    { name: 'desktop', testIgnore: '**/touch.spec.js' },
+    { name: 'desktop', testIgnore: ['**/explorer.spec.js', '**/touch.spec.js'] },
+    { name: 'rendering', testMatch: '**/explorer.spec.js' },
     {
       name: 'touch',
       testMatch: '**/touch.spec.js',
