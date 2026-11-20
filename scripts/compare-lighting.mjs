@@ -5,13 +5,19 @@ import { chromium } from '@playwright/test';
 import { preview } from 'vite';
 
 const compareSurfaces = process.argv.includes('--surfaces');
-const destination = resolve(compareSurfaces ? 'release/physical-surface-comparison' : 'release/lighting-comparison');
+const compareDaylight = process.argv.includes('--daylight');
+const destination = resolve(compareDaylight ? 'release/daylight-comparison' :
+  compareSurfaces ? 'release/physical-surface-comparison' : 'release/lighting-comparison');
 const shots = [
   ['01', 'meadow', 'sakura-creek'],
   ['04', 'trail', 'rice-terraces'],
 ];
-if (compareSurfaces) shots.push(['08', 'waterfront', 'coastal-waterfront']);
-if (process.argv.includes('--night')) shots.push(['10', 'trail', 'festival-night']);
+if (compareSurfaces && !compareDaylight) shots.push(['08', 'waterfront', 'coastal-waterfront']);
+if (compareDaylight) {
+  shots.push(['01', 'bridge', 'bridge-and-water'], ['04', 'fields', 'flooded-fields']);
+} else if (process.argv.includes('--night')) {
+  shots.push(['10', 'trail', 'festival-night']);
+}
 await mkdir(destination, { recursive: true });
 
 const server = await preview({ base: '/sakura/', preview: { host: '127.0.0.1', port: 0 } });
@@ -31,15 +37,18 @@ try {
   for (const [scene, view, name] of shots) {
     const captures = [];
     for (const lighting of ['legacy', 'enhanced']) {
-      const variant = compareSurfaces ? `surface=${lighting}` : `lighting=${lighting}`;
+      const variant = compareDaylight ? `daylight=${lighting === 'legacy' ? 'baseline' : 'natural'}` :
+        compareSurfaces ? `surface=${lighting}&daylight=baseline` : `lighting=${lighting}&daylight=baseline`;
       await page.goto(`${site}?scene=${scene}&${variant}&trace-lighting`);
       await page.locator(`#explorer[data-state="ready"][data-scene="${scene}"]`).waitFor({ timeout: 90_000 });
       const selected = page.locator(`[data-view="${view}"]`);
       if (await selected.getAttribute('aria-pressed') !== 'true') await selected.click();
       const explorer = page.locator('#explorer');
       assert.equal(await explorer.getAttribute('data-lighting'),
-        !compareSurfaces && lighting === 'legacy' ? 'legacy' : 'hdr-post');
-      if (compareSurfaces) {
+        !compareDaylight && !compareSurfaces && lighting === 'legacy' ? 'legacy' : 'hdr-post');
+      if (compareDaylight) {
+        assert.equal(await explorer.getAttribute('data-daylight'), lighting === 'legacy' ? 'baseline' : 'natural');
+      } else if (compareSurfaces) {
         assert.equal(await explorer.getAttribute('data-surface'), lighting === 'legacy' ? 'legacy' : 'physical');
       }
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -52,7 +61,7 @@ try {
     assert.deepEqual(JSON.parse(captures[0].pose), JSON.parse(captures[1].pose), `${name} camera`);
     assert.ok(!captures[0].image.equals(captures[1].image), `${name} lighting`);
     evidence.push({ scene, view, camera: JSON.parse(captures[0].pose), legacy: `${name}-legacy.png`, enhanced: `${name}-enhanced.png` });
-    console.log(`${name}: fixed camera verified, ${compareSurfaces ? 'physical surfaces' : 'HDR+ACES'} comparison captured`);
+    console.log(`${name}: fixed camera verified, ${compareDaylight ? 'daylight' : compareSurfaces ? 'physical surfaces' : 'HDR+ACES'} comparison captured`);
   }
   assert.deepEqual(errors, []);
   await writeFile(resolve(destination, 'camera-poses.json'), JSON.stringify(evidence, null, 2) + '\n');

@@ -1,11 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  DataTexture, Float32BufferAttribute, InstancedMesh, Matrix4, Mesh, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry, Scene,
+  BoxGeometry, DataTexture, Float32BufferAttribute, InstancedMesh, Matrix4, Mesh, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry, Scene,
 } from 'three';
 import { createGaussianDetail } from '../src/detail/gaussian-detail.js';
 import { disposeScene } from '../src/world/dispose-scene.js';
 import { groundMaterial } from '../src/world/ground-material.js';
+import { createContactOcclusion } from '../src/world/contact-occlusion.js';
+
+test('rotated watergate contact occlusion follows its posts and leaves the channel open', () => {
+  const scene = new Scene();
+  const gate = new InstancedMesh(new BoxGeometry(4, 2.8, .76), new MeshStandardMaterial(), 1);
+  gate.name = 'Watergate_frame';
+  gate.userData.surfaceAsset = 'sluice';
+  gate.setMatrixAt(0, new Matrix4().makeRotationY(Math.PI / 2).setPosition(5, 0, 6));
+  scene.add(gate);
+  const occlusion = createContactOcclusion(true);
+  occlusion.bake(scene);
+  const { image: { width, data } } = occlusion.texture;
+  const { area } = occlusion;
+  const sample = (x, z) => data[Math.floor((z - area.y) * width / area.w) * width +
+    Math.floor((x - area.x) * width / area.z)];
+  assert.ok(sample(5, 6 - 1.68) < 115 && sample(5, 6 + 1.68) < 115);
+  assert.equal(sample(5, 6), 255);
+  assert.equal(sample(5 + 1.68, 6), 255);
+  occlusion.texture.dispose();
+  disposeScene(scene);
+});
 
 test('replacing a scene disposes each shared resource exactly once', () => {
   const texture = new DataTexture(new Uint8Array(4), 1, 1);

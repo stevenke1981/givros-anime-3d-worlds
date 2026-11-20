@@ -4,7 +4,9 @@ import {
   riverWidth, smooth
 } from './layout.js';
 import { groundMaterial } from './ground-material.js';
+import { cloudLayerGLSL } from '../lighting/sky-clouds.js';
 import { waterEnvironmentGLSL } from '../lighting/water-environment.js';
+import { createWaterMaterial, setWaterDepth } from './water-material.js';
 
 export function randomSequence(initialSeed) {
   let seed = initialSeed >>> 0;
@@ -15,13 +17,14 @@ export function randomSequence(initialSeed) {
 }
 
 function landscapeMesh(w, h, pointAt, material) {
-  const positions = [], colors = [], landCover = [], indices = [];
+  const positions = [], colors = [], landCover = [], wetness = [], indices = [];
   for (let j = 0; j <= h; j++) {
     for (let i = 0; i <= w; i++) {
-      const [x, y, z, color, cover] = pointAt(i / w, j / h);
+      const [x, y, z, color, cover, damp] = pointAt(i / w, j / h);
       positions.push(x, y, z);
       if (color) colors.push(color.r, color.g, color.b);
       if (cover) landCover.push(...cover);
+      if (damp !== undefined) wetness.push(damp);
       if (i === w || j === h) continue;
       const a = j * (w + 1) + i, b = a + w + 1;
       indices.push(a, b, a + 1, a + 1, b, b + 1);
@@ -31,6 +34,7 @@ function landscapeMesh(w, h, pointAt, material) {
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   if (colors.length) geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   if (landCover.length) geometry.setAttribute('landCover', new THREE.Float32BufferAttribute(landCover, 3));
+  if (wetness.length) geometry.setAttribute('landWetness', new THREE.Float32BufferAttribute(wetness, 1));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return new THREE.Mesh(geometry, material);
@@ -43,7 +47,7 @@ const extend = (value, lower, upper) => {
   return mix(lower, upper, (value - fringe) / (1 - 2 * fringe));
 };
 
-export function addTerrain(scene, detail) {
+export function addTerrain(scene, detail, naturalLighting = false) {
   const palette = {
     grass: new THREE.Color('#77854e'),
     straw: new THREE.Color('#a1a175'),
@@ -76,13 +80,15 @@ export function addTerrain(scene, detail) {
     color.lerp(palette.pathShade.clone().lerp(palette.path, .61 + broad * .36), wear);
     let earth = Math.max(shore * .90, wear);
     let rocky = shore * smooth(.8, -.40, bank);
-    for (const [px, pz, rx, rz] of paddies) {
+    let wetness = naturalLighting ? shore * smooth(.36, .12, y - riverLevel(z)) : undefined;
+    for (const [px, pz, rx, rz, water] of paddies) {
       if (Math.abs(x - px) > rx + 1 || Math.abs(z - pz) > rz + 1) continue;
       const r = paddyShape(x - px, z - pz, rx, rz);
       const basin = smooth(1.12, .77, r);
       color.lerp(palette.mud, basin);
       earth = Math.max(earth, basin);
       color.lerp(palette.grass, smooth(.9, 1.02, r) * smooth(1.18, 1.06, r) * .5);
+      if (naturalLighting) wetness = Math.max(wetness, smooth(1.13, .95, r) * smooth(.36, .12, y - water));
     }
     const courtyard = Math.hypot((x + 18) * .86, (z + 46.5) * 1.10);
     const court = smooth(5.5, 4.2, courtyard);
@@ -90,9 +96,11 @@ export function addTerrain(scene, detail) {
     earth = Math.max(earth, court);
     rocky = Math.max(rocky, court * .65);
     color.multiplyScalar(1 + grain);
-    return [x, y, z, color, [earth, rocky, rocky * .23]];
-  }, groundMaterial(detail, { roughness: .96 }));
+    return [x, y, z, color, [earth, rocky, rocky * .23], wetness];
+  }, groundMaterial(detail, { roughness: .96 }, { wetSoil: naturalLighting, receiveContacts: naturalLighting }));
   turf.receiveShadow = true;
+  turf.castShadow = naturalLighting;
+  if (naturalLighting) turf.material.shadowSide = THREE.FrontSide;
   turf.name = 'Sculpted river valley and earth terraces';
   turf.userData.gaussianKind = 'turf';
   scene.add(turf);
@@ -150,14 +158,14 @@ float noise(vec2 p) {
 
 export const sunDirection = new THREE.Vector3(-.54, .70, .46).normalize();
 
-export function addSky(scene) {
+export function addSky(scene, direction = sunDirection, naturalLighting = false) {
   const sky = new THREE.Mesh(new THREE.SphereGeometry(480, 40, 20), new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
     uniforms: {
       horizon: { value: new THREE.Color('#d8edf6') },
       zenith: { value: new THREE.Color('#4e9ad8') },
-      sun: { value: sunDirection }
+      sun: { value: direction }
     },
     vertexShader: `
       varying vec3 vRay;
@@ -169,6 +177,7 @@ export function addSky(scene) {
       uniform vec3 horizon, zenith, sun;
       varying vec3 vRay;
       ${noiseGLSL}
+      ${naturalLighting ? cloudLayerGLSL : ''}
       float cloudNoise(vec2 point) {
         return noise(point) * .57 + noise(point * 2.12) * .25 +
           noise(point * 4.28) * .12 + noise(point * 8.49) * .06;
@@ -191,7 +200,9 @@ export function addSky(scene) {
         float crown = smoothstep(-.055,.065,chart.y - .145 +
           (cloudNoise(cloudCoord + vec2(-.1,.18)) - .5) * .17);
         vec3 lit = mix(vec3(.63,.75,.89), vec3(1.,.99,.96), crown);
-        color = mix(color, lit, cloud * .94);
+        color = ${naturalLighting
+          ? 'mix(color, vec3(1.16, 1.14, 1.08), skyCloudCoverage(ray) * .90)'
+          : 'mix(color, lit, cloud * .94)'};
         gl_FragColor = vec4(color, 1.);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -203,9 +214,12 @@ export function addSky(scene) {
   scene.add(sky);
 }
 
-export function addWater(scene) {
+export function addWater(scene, realisticWater = false, sunlightDirection = sunDirection) {
   const clock = { value: 0 };
-  const waterMaterial = new THREE.ShaderMaterial({
+  const waterOptions = { clock, sun: sunlightDirection, sky: '#abd9e9' };
+  const waterMaterial = realisticWater ? createWaterMaterial({
+    ...waterOptions, kind: 'river', deep: '#1895a0', soil: '#7d785b',
+  }) : new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     userData: { waterEnvironment: true },
     uniforms: {
@@ -290,34 +304,46 @@ export function addWater(scene) {
     return [riverCenter(z) + (u * 2 - 1) * (riverWidth(z) + .82), riverLevel(z), z];
   }, waterMaterial);
   river.name = 'Turquoise river with downstream surface flow';
+  if (realisticWater) setWaterDepth(river, groundAt);
   scene.add(river);
 
-  const paddyMaterial = waterMaterial.clone();
-  paddyMaterial.uniforms.clock = clock;
-  paddyMaterial.uniforms.isPaddy.value = 1;
-  paddyMaterial.uniforms.deep.value = new THREE.Color('#8e9e68');
-  paddyMaterial.uniforms.shallow.value = new THREE.Color('#b8ba76');
+  const paddyMaterial = realisticWater ? createWaterMaterial({
+    ...waterOptions, kind: 'paddy', deep: '#668574', soil: '#807250',
+  }) : waterMaterial.clone();
+  if (!realisticWater) {
+    paddyMaterial.uniforms.clock = clock;
+    paddyMaterial.uniforms.isPaddy.value = 1;
+    paddyMaterial.uniforms.deep.value.set('#8e9e68');
+    paddyMaterial.uniforms.shallow.value.set('#b8ba76');
+  }
   for (const [px, pz, rx, rz, level] of paddies) {
-    const basinMaterial = paddyMaterial.clone();
-    basinMaterial.uniforms.clock = clock;
-    basinMaterial.uniforms.basinBounds.value.set(px, pz, rx, rz);
-    basinMaterial.uniforms.deep.value.set('#71694b');
-    basinMaterial.uniforms.shallow.value.set('#8f835b');
+    const basinMaterial = realisticWater ? paddyMaterial : paddyMaterial.clone();
+    if (!realisticWater) {
+      basinMaterial.uniforms.clock = clock;
+      basinMaterial.uniforms.basinBounds.value.set(px, pz, rx, rz);
+      basinMaterial.uniforms.deep.value.set('#71694b');
+      basinMaterial.uniforms.shallow.value.set('#8f835b');
+    }
     const basin = landscapeMesh(20, 20, (u, v) => {
       const x = (u * 2 - 1), z = (v * 2 - 1);
       const scale = Math.max(Math.abs(x), Math.abs(z)) / Math.max(paddyShape(x, z, 1, 1), .0001);
       return [px + x * scale * rx * .96, level, pz + z * scale * rz * .96];
     }, basinMaterial);
     basin.name = 'Flooded rice terrace';
+    if (realisticWater) setWaterDepth(basin, groundAt);
     scene.add(basin);
   }
 
+  const irrigationMaterial = realisticWater ? createWaterMaterial({
+    ...waterOptions, kind: 'canal', deep: '#6c8c7b', soil: '#827252',
+  }) : paddyMaterial;
   const irrigation = landscapeMesh(8, 51, (u, v) => {
     const x = mix(7.3, 16.1, v);
     const z = -25.2 + 5.7 * v + (u - .5) * .37;
     return [x, groundAt(x, z) + .025, z];
-  }, paddyMaterial);
+  }, irrigationMaterial);
   irrigation.name = 'Uphill paddy feeder channel';
+  if (realisticWater) setWaterDepth(irrigation, groundAt);
   scene.add(irrigation);
   return clock;
 }

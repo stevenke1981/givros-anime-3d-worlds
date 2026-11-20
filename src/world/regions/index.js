@@ -5,6 +5,8 @@ import { addAtmosphere, addTerrain, addHydrology, addSteam } from './terrain.js'
 import { applyAssetSurfaces } from '../surface-material.js';
 import { addSurfaceDetailGeometry } from '../surface-detail-geometry.js';
 import { createVegetationWind } from '../vegetation-wind.js';
+import { createContactOcclusion } from '../contact-occlusion.js';
+import { extendRoofOverhangs } from '../roof-overhang.js';
 
 const trailLabels = {
   '02': '礫岸步道', '03': '竹林入口', '04': '田野入口',
@@ -14,20 +16,24 @@ const trailLabels = {
 
 export async function createRegionalWorld(id, {
   renderer, onProgress=()=>{}, useBakedMaterials=false, physicalSurfaces=false,
+  naturalLighting=false, coarse=false,
 }={}) {
-  const layout=createRegionalLayout(id);
+  const layout=createRegionalLayout(id,{naturalLighting});
   const {spec,surfaceAt,canWalk,groundAt,waterAt,routeBlend}=layout;
   onProgress(.08,'準備地形');
   const assets=await loadRegionalAssets(layout,onProgress,useBakedMaterials);
   const scene=new THREE.Scene();
   if (spec.night) scene.userData.gaussianExposure=.47;
   if (renderer?.shadowMap) renderer.shadowMap.enabled=true;
-  const sun=addAtmosphere(scene,layout,physicalSurfaces);
+  const sun=addAtmosphere(scene,layout,physicalSurfaces,naturalLighting,coarse);
   onProgress(.64,'生成河流、丘陵與步道');
-  const groundDetail=addTerrain(scene,layout,physicalSurfaces);
-  const clock=addHydrology(scene,layout,sun,useBakedMaterials);
+  const contacts=naturalLighting ? createContactOcclusion(coarse) : undefined;
+  const groundDetail=addTerrain(scene,layout,physicalSurfaces,contacts);
+  const clock=addHydrology(scene,layout,sun,useBakedMaterials,naturalLighting);
   onProgress(.83,'排列房屋、地標與林木');
   const blocks=populateRegionalWorld(scene,layout,assets,32671+Number(id)*3721);
+  if (naturalLighting) extendRoofOverhangs(scene);
+  contacts?.bake(scene);
   const wind=physicalSurfaces ? createVegetationWind() : undefined;
   if (wind) {
     applyAssetSurfaces(scene,groundDetail);

@@ -23,9 +23,13 @@ export function createLightingPipeline(renderer, { legacy = false, coarse = fals
     return configured.has(scene) ? (hdrTargetSupported ? 'hdr-post' : 'aces-direct') : 'legacy';
   }
 
-  function apply(scene, id, physicalSurfaces = false) {
+  function apply(scene, id, physicalSurfaces = false, naturalLighting = false) {
     if (legacy || !hasLightingProfile(id) || configured.has(scene)) return mode(scene);
-    const profile = lightingProfiles[id];
+    const originalProfile = lightingProfiles[id];
+    const profile = naturalLighting ? {
+      ...originalProfile, exposure: 1.04, environment: .29, hemisphere: .74, direct: 1,
+      sunRadiance: 22, glow: .036, contrast: .112,
+    } : originalProfile;
     const { environment, environmentIntensity } = scene;
     const lights = [];
     const water = new Set();
@@ -35,10 +39,18 @@ export function createLightingPipeline(renderer, { legacy = false, coarse = fals
       if (node.isHemisphereLight) lights.push([node, node.intensity]);
       if (physicalSurfaces && node.material?.userData.waterEnvironment) water.add(node.material);
     });
+    if (sun) {
+      for (const material of water) {
+        if (material.uniforms.waterSunIntensity) {
+          material.uniforms.waterSunIntensity.value = sun.intensity * profile.direct;
+          material.uniforms.waterSunColor.value.copy(sun.color);
+        }
+      }
+    }
     let radiance;
     if (sun && hdrTargetSupported) {
       const direction = sun.getWorldPosition(new Vector3()).sub(sun.target.getWorldPosition(new Vector3())).normalize();
-      const sky = createSkyRadiance(profile, direction, sun.color, physicalSurfaces && !coarse ? 512 : 256);
+      const sky = createSkyRadiance(profile, direction, sun.color, physicalSurfaces && !coarse ? 512 : 256, naturalLighting);
       pmrem ??= new PMREMGenerator(renderer);
       try {
         radiance = pmrem.fromEquirectangular(sky);
@@ -54,6 +66,8 @@ export function createLightingPipeline(renderer, { legacy = false, coarse = fals
         material.uniforms.waterEnvironmentIntensity = { value: scene.environmentIntensity };
         material.needsUpdate = true;
       }
+    }
+    if (radiance || naturalLighting) {
       for (const [light, intensity] of lights) light.intensity = intensity * profile.hemisphere;
     }
     if (sun) {

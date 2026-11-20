@@ -11,7 +11,7 @@ const modelSizes = {
 };
 const waterOff = -99;
 
-export function createRegionalLayout(id) {
+export function createRegionalLayout(id, { naturalLighting = false } = {}) {
   const spec = regionSpecs[id];
   if (!spec) throw new RangeError(`Unknown regional world: ${id}`);
   const { terrain, stream, coast, lake, routes, sanctuary, stair, ford, pool, sluice } = spec;
@@ -32,6 +32,23 @@ export function createRegionalLayout(id) {
   const dockSpec = coast?.dock ?? lake?.dock;
   const dock = dockSpec && { x: dockSpec[0], z: dockSpec[1], y: dockSpec[2], r: dockSpec[3] ?? 0 };
   const paddies = spec.paddies ?? [];
+  let canal;
+  if (id === '04' && naturalLighting) {
+    // The irrigation ditch follows the field side of the middle terrace path.
+    const road = routes[1].slice(2);
+    const start = -3, end = 32.8;
+    const roadAt = (x, axis) => {
+      const next = road.findIndex(([px]) => px > x);
+      const a = road[next-1], b = road[next];
+      return mix(a[axis], b[axis], (x-a[0])/(b[0]-a[0]));
+    };
+    const fadeAt = x => smooth(start,start+1.12,x) * smooth(end,end-1.12,x);
+    const centerAt = x => roadAt(x,1) + 1.21 + .096*Math.sin(x*.77+.94) + .049*Math.sin(x*1.63);
+    const widthAt = x => (.345 + .048*Math.sin(x*.44) + .026*Math.sin(x*1.37)) * fadeAt(x);
+    const waterAt = x => roadAt(x,2) - .41;
+    const edgeAt = (x,z) => x < start || x > end ? Infinity : Math.abs(z-centerAt(x))-widthAt(x);
+    canal = { start, end, centerAt, widthAt, waterAt, edgeAt, fadeAt };
+  }
   const segments = routes.flatMap(route => route.slice(1).map(([x1,z1,y1],index) => {
     const [x0,z0,y0] = route[index];
     const dx = x1 - x0, dz = z1 - z0;
@@ -74,6 +91,7 @@ export function createRegionalLayout(id) {
   }
 
   function waterAt(x,z) {
+    if (canal && canal.edgeAt(x,z)<.09) return canal.waterAt(x);
     const lakeEdge = seaEdge(x,z);
     if (lakeEdge < 0) return (coast ?? lake).level;
     if (riverEdge(x,z) < 0) return baseWaterAt(z);
@@ -117,6 +135,14 @@ export function createRegionalLayout(id) {
     if (ford && Math.abs(z-ford.z) < ford.width + 1) {
       const shallow = smooth(ford.width + .8,ford.width-.3,Math.abs(z-ford.z)) * smooth(1,-.7,edge);
       y = mix(y,ford.y,shallow);
+    }
+    if (canal) {
+      const bank = canal.edgeAt(x,z);
+      if (bank < .59) {
+        const bed = canal.waterAt(x) + mix(-.235,.135,smooth(-.27,.18,bank));
+        const shore = mix(bed,y,smooth(.09,.59,bank));
+        y = mix(y,shore,canal.fadeAt(x));
+      }
     }
     return y;
   }
@@ -231,7 +257,7 @@ export function createRegionalLayout(id) {
     id === '02' ? at('river-bridge',bridge.x,bridge.z) :
     at(sanctuary.model === 'temple' ? 'temple' : 'shrine',sanctuary.x,sanctuary.z);
   return {
-    id, spec, routes, crossings, dock, ford, paddies, buildings, lanterns,
+    id, spec, routes, crossings, dock, ford, paddies, buildings, lanterns, canal,
     stairs: {...stair,count,depth:stairDepth,yAt:stairY},
     landmarks: [featured,at('lookout',spec.overlook.position[0],spec.overlook.position[2]),
       at('gate',...spec.gate),at('crossing',bridge.x,bridge.z)],

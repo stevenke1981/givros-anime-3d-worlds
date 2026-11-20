@@ -107,3 +107,31 @@ test('Warped lake contours match the physical waterline, dock and outlet', () =>
   assert.ok(Math.max(...scales)-Math.min(...scales)>.18);
   assert.ok(world.baseWaterAt(world.crossings[0].z)<world.spec.lake.level);
 });
+
+test('Scene 04 has a recessed downhill ditch beside the existing walking route', () => {
+  const legacy = createRegionalLayout('04');
+  const terrace = createRegionalLayout('04', { naturalLighting: true });
+  const { canal } = terrace;
+  assert.equal(legacy.canal, undefined);
+  let previousWater = -Infinity;
+  for (let x = canal.start + 1.2; x < canal.end - 1.2; x += .13) {
+    const z = canal.centerAt(x), water = canal.waterAt(x), halfWidth = canal.widthAt(x);
+    assert.ok(water > previousWater);
+    assert.equal(terrace.waterAt(x,z), water);
+    assert.ok(water - terrace.groundAt(x,z) > .20);
+    assert.ok(terrace.groundAt(x,z - halfWidth - .17) > water + .035);
+    assert.ok(terrace.groundAt(x,z + halfWidth + .17) > water + .035);
+    assert.ok(!terrace.canWalk(x,z));
+    previousWater = water;
+  }
+  const path = terrace.routes[1];
+  for (let i = 1; i < path.length; i++) {
+    const [ax,az] = path[i-1], [bx,bz] = path[i];
+    const count = Math.ceil(Math.hypot(bx-ax,bz-az)/.09);
+    for (let j = 0; j <= count; j++) {
+      const x = ax + (bx-ax)*j/count, z = az + (bz-az)*j/count;
+      assert.ok(terrace.canWalk(x,z));
+      assert.equal(terrace.surfaceAt(x,z), legacy.surfaceAt(x,z));
+    }
+  }
+});

@@ -55,4 +55,8 @@ Gaussian 細節取樣自枝葉、草地和山體的實際網格，沿表面投�
 
 保留 HDR 與烘焙材質的對照模式為 `?surface=legacy`。建置後執行 `npm run compare:lighting -- --surfaces` 可在 `release/physical-surface-comparison/` 取得溪岸、梯田、海岬和夜祭的固定鏡位截圖與相機座標。
 
+春櫻溪岸和梯田的日景使用斜射日光與單次更新的 PCF 柔影。地形、水面同時接收投影，地表接觸遮蔽依照每景構件的實際位置生成。水面以兩組漣漪取樣同一片 HDR 天空的雲層，梯田灌渠沿田埂下切並保留原有步行路線。
+
+`?daylight=baseline` 在這兩景保留上一版 PBR 渲染。執行 `npm run build` 與 `npm run compare:lighting -- --daylight` 可在 `release/daylight-comparison/` 取得溪岸、橋面、梯田入口與濕田的同鏡位對照。
+
 十組設計原稿與提示詞使用方式見[繁體中文提示詞指南](README_繁體中文.md)。

@@ -74,7 +74,7 @@ function addInstances(group, parts, placement, castShadow, kind) {
 }
 
 export function populateRegionalWorld(scene, layout, assets, seed) {
-  const {spec,groundAt,routeBlend,waterAt,riverEdge,seaEdge,buildings,crossings,paddies,dock,stairs,lanterns}=layout;
+  const {spec,groundAt,routeBlend,waterAt,riverEdge,seaEdge,buildings,crossings,paddies,canal,dock,stairs,lanterns}=layout;
   const rand=randomSequence(seed);
   const groups=new Map();
   const put=(name,x,y,z,r=0,s=1,sy=s,sz=s,tint)=> {
@@ -106,7 +106,29 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     blocked.push([...spec.basin,.91]);
   }
   lanterns.forEach(([x,z],i)=>prop('stone-lantern',x,z,.19*i,.90+(.06*(i%3))));
-  if (spec.sluice) put('sluice',spec.sluice[0],spec.sluice[2],spec.sluice[1],Math.PI*.50);
+  if (canal) {
+    const [x]=spec.sluice, z=canal.centerAt(x);
+    const yaw=Math.atan2(.60,canal.centerAt(x+.30)-canal.centerAt(x-.30));
+    put('sluice',x,canal.waterAt(x)+.025,z,yaw,.49,.92,1);
+    for (const side of [-1,1]) {
+      const offset=side*1.38*.49;
+      blocked.push([x+offset*Math.cos(yaw),z-offset*Math.sin(yaw),.27]);
+    }
+    const bankRand=randomSequence(seed+3631);
+    const stoneTints=['#b6ae9e','#aeb2a3','#8f9890'].map(hex=>new THREE.Color(hex));
+    for (const side of [-1,1]) {
+      for (let px=canal.start+1.24;px<canal.end-1.24;px+=mix(.26,.48,bankRand())) {
+        // Pieces share a bank alignment, with longer gaps exposing the mud shelf.
+        const worn=Math.sin(px*.72+side*1.46)+.48*Math.sin(px*1.51+.40);
+        if (worn<.08 || bankRand()<.17 || Math.abs(px-x)<.85) continue;
+        const pz=canal.centerAt(px)+side*(canal.widthAt(px)+mix(.11,.24,bankRand()));
+        const rockYaw=Math.atan2(canal.centerAt(px-.21)-canal.centerAt(px+.21),.42);
+        const length=mix(.14,.23,bankRand()), height=mix(.13,.23,bankRand());
+        put('rock',px,groundAt(px,pz)-.083,pz,rockYaw+(bankRand()-.5)*.88,
+          length,height,mix(.12,.19,bankRand()),stoneTints[Math.floor(bankRand()*stoneTints.length)]);
+      }
+    }
+  } else if (spec.sluice) put('sluice',spec.sluice[0],spec.sluice[2],spec.sluice[1],Math.PI*.50);
   if (spec.pool) {
     put('onsen-pool',spec.pool[0],spec.pool[2],spec.pool[1],0);
     for (let i=0;i<4;i++) {
@@ -246,10 +268,22 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     }
   }
 
+  const cropRand=canal && randomSequence(seed+7859);
   for (const [x,z,rx,rz,y] of paddies) {
     for (let dx=-rx;dx<rx;dx+=.75) for (let dz=-rz;dz<rz;dz+=.78) {
-      const a=dx+(rand()-.5)*.16,b=dz+(rand()-.5)*.16,s=mix(.80,1.11,rand());
-      if (paddyShape(a,b,rx,rz) < .85) put('rice',x+a,y-.14,z+b,rand()*6.28,s,s,s,tints[(Math.floor(rand()*6))]);
+      const a=dx+(rand()-.5)*.16,b=dz+(rand()-.5)*.16,size=rand();
+      if (paddyShape(a,b,rx,rz) >= .85) continue;
+      const yaw=rand()*6.28,tint=tints[Math.floor(rand()*6)];
+      if (cropRand) {
+        const px=x+a+(cropRand()-.5)*.21 + .10*Math.sin(dz*.77+x);
+        const pz=z+b+(cropRand()-.5)*.19 + .065*Math.sin(dx*.96+z);
+        const pocket=Math.sin(px*.96+pz*.41)*Math.cos(pz*1.27-px*.15);
+        if (cropRand()<(pocket>.72?.43:.052) || paddyShape(px-x,pz-z,rx,rz)>=.89) continue;
+        prop('rice',px,pz,yaw,mix(.85,1.15,size),.008,tint);
+      } else {
+        const s=mix(.80,1.11,size);
+        put('rice',x+a,y-.14,z+b,yaw,s,s,s,tint);
+      }
     }
     if (spec.sluice) for (let i=-1;i<=1;i++) {
       const px=x-rx-1.04,pz=z+i*2.42;
@@ -269,8 +303,9 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
   const detailModels = new Set(regionalPlantModels(layout.id));
   for (const [name,positions] of groups) {
     const kind=plantingKinds[name] ?? (treeModels.has(name)?'tree':name==='shrub'?'shrub':undefined);
-    const cast=!['grass','rice','river-sedge','meadow-grass','woodland-fern','seasonal-forbs','shore-reeds',
-      'cedar-lod','maple-lod','coastal-pine-lod','stair-tread'].includes(name);
+    const cast=(canal && (name==='rice' || name==='river-sedge')) ||
+      !['grass','rice','river-sedge','meadow-grass','woodland-fern','seasonal-forbs','shore-reeds',
+        'cedar-lod','maple-lod','coastal-pine-lod','stair-tread'].includes(name);
     if (kind||detailModels.has(name)||name==='grass'||name==='rice') {
       const chunks=new Map();
       for (const item of positions) {
@@ -289,7 +324,7 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
         for (const [variant,distance] of [[name,0],[name+'-lod',plantingLOD[name]]]) {
           const batch=new THREE.Group();
           batch.position.set(-x,0,-z);
-          addInstances(batch,assets[variant],chunk,distance===0 && cast,kind);
+          addInstances(batch,assets[variant],chunk,(distance===0 || Boolean(canal)) && cast,kind);
           level.addLevel(batch,distance,.11);
         }
         scene.add(level);

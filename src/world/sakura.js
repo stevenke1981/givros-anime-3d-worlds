@@ -11,6 +11,9 @@ import { modelPath } from './model-path.js';
 import { applyAssetSurfaces } from './surface-material.js';
 import { addSurfaceDetailGeometry } from './surface-detail-geometry.js';
 import { createVegetationWind } from './vegetation-wind.js';
+import { createContactOcclusion } from './contact-occlusion.js';
+import { daylightDirection, shapeDaylightShadows } from '../lighting/daylight.js';
+import { extendRoofOverhangs } from './roof-overhang.js';
 
 const assetNames = [
   'house', 'bridge', 'torii', 'shrine', 'sakura', 'cedar', 'cedar-lod',
@@ -65,7 +68,7 @@ function batchAsset(scene, parts, placements, { castShadow = true, receiveShadow
   }
 }
 
-function populate(scene, assets) {
+function populate(scene, assets, naturalLighting) {
   const rand = randomSequence(24118);
   const hitCircles = [];
   const blocked = (x, z) => hitCircles.some(([cx, cz, radius]) =>
@@ -151,13 +154,14 @@ function populate(scene, assets) {
 
   for (const [px, pz, rx, rz, water] of paddies) {
     const spacing = .71;
+    const missing = randomSequence(71821 + Math.round(px * 21 + pz * 37));
     for (let dz = -rz; dz <= rz; dz += spacing) {
       for (let dx = -rx; dx <= rx; dx += spacing) {
         const x = px + dx + (rand() - .5) * .18, z = pz + dz + (rand() - .5) * .18;
         if (paddyShape(x - px, z - pz, rx, rz) > .83) continue;
         const s = .83 + rand() * .30;
-        rice.push([x, water - .135, z, rand() * 6.28, s, s, s,
-          new THREE.Color().setScalar(.80 + rand() * .20)]);
+        const yaw = rand() * 6.28, tint = new THREE.Color().setScalar(.80 + rand() * .20);
+        if (!naturalLighting || missing() >= .04) rice.push([x, water - .135, z, yaw, s, s, s, tint]);
       }
     }
   }
@@ -207,7 +211,7 @@ function populate(scene, assets) {
   }
   batchAsset(scene, assets.bamboo, bamboo);
   batchAsset(scene, assets.rock, rock);
-  batchAsset(scene, assets.rice, rice, { castShadow: false });
+  batchAsset(scene, assets.rice, rice, { castShadow: naturalLighting });
   batchAsset(scene, assets.fence, fences);
   batchAsset(scene, assets['stone-lantern'], lanterns);
 
@@ -250,7 +254,7 @@ function populate(scene, assets) {
     }
     for (const patch of clusters.values()) {
       batchAsset(scene, assets[species], patch, {
-        castShadow: false,
+        castShadow: naturalLighting && species === 'river-sedge',
         gaussianKind: species === 'wild-azalea' ? 'shrub' : undefined,
       });
     }
@@ -326,17 +330,21 @@ function addPetals(scene, blossomSites) {
 
 export async function createSakuraWorld({
   renderer, onProgress = () => {}, useBakedMaterials = false, physicalSurfaces = false,
+  naturalLighting = false, coarse = false,
 } = {}) {
   onProgress(.07, '準備春櫻山村');
   const assets = await loadAssets(onProgress, useBakedMaterials);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#a1cce8');
   scene.fog = new THREE.FogExp2('#c1d8e6', .0041);
-  const skylight = new THREE.HemisphereLight('#e2ecff', '#8e8a70', 1.53);
+  const direction = naturalLighting ? daylightDirection('01') : sunDirection;
+  const skylight = naturalLighting
+    ? new THREE.HemisphereLight('#aed0ff', '#626b4b', .94)
+    : new THREE.HemisphereLight('#e2ecff', '#8e8a70', 1.53);
   scene.add(skylight);
-  const sunlight = new THREE.DirectionalLight('#fff0d4', 2.1);
-  sunlight.position.copy(sunDirection).multiplyScalar(102).add(new THREE.Vector3(0, 0, -11));
+  const sunlight = new THREE.DirectionalLight('#fff0d4', naturalLighting ? 3.62 : 2.1);
   sunlight.target.position.set(0, 0, -11);
+  sunlight.position.copy(direction).multiplyScalar(102).add(sunlight.target.position);
   sunlight.castShadow = true;
   sunlight.shadow.mapSize.set(2048, 2048);
   sunlight.shadow.normalBias = .062;
@@ -344,17 +352,21 @@ export async function createSakuraWorld({
   sunlight.shadow.radius = 3.2;
   Object.assign(sunlight.shadow.camera, { left: -49, right: 49, top: 53, bottom: -53, near: 5, far: 175 });
   sunlight.shadow.camera.updateProjectionMatrix();
+  if (naturalLighting) shapeDaylightShadows(sunlight, coarse);
   scene.add(sunlight, sunlight.target);
   if (renderer?.shadowMap) renderer.shadowMap.enabled = true;
 
   onProgress(.69, '雕塑河谷與梯田');
-  const groundDetail = createGroundDetail(physicalSurfaces);
-  addSky(scene);
+  const contacts = naturalLighting ? createContactOcclusion(coarse) : undefined;
+  const groundDetail = createGroundDetail(physicalSurfaces, contacts);
+  addSky(scene, direction, naturalLighting);
   addMountains(scene, groundDetail);
-  addTerrain(scene, groundDetail);
-  const water = addWater(scene);
+  addTerrain(scene, groundDetail, naturalLighting);
+  const water = addWater(scene, naturalLighting, direction);
   onProgress(.87, '排列村墅、竹林與春櫻');
-  const { blossomSites, blocked } = populate(scene, assets);
+  const { blossomSites, blocked } = populate(scene, assets, naturalLighting);
+  if (naturalLighting) extendRoofOverhangs(scene);
+  contacts?.bake(scene);
   const wind = physicalSurfaces ? createVegetationWind() : undefined;
   if (wind) {
     applyAssetSurfaces(scene, groundDetail);

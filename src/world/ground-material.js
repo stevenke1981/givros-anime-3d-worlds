@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { surfaceDetailGLSL } from './surface-material.js';
+import { applyHeightFog } from '../lighting/height-fog.js';
 
 function repeatValue(x, z, period, seed) {
   const ix = Math.floor(x), iz = Math.floor(z);
@@ -15,7 +16,7 @@ function repeatValue(x, z, period, seed) {
   return low * (1 - sz) + high * sz;
 }
 
-export function createGroundDetail(physicalSurfaces = false) {
+export function createGroundDetail(physicalSurfaces = false, contactOcclusion) {
   // Pack individual material signals and relief into a periodic data map. Use nonmatching
   // physical scales in the shader so the same tile never reads as a repeated patch.
   const size = 256;
@@ -44,22 +45,32 @@ export function createGroundDetail(physicalSurfaces = false) {
   texture.needsUpdate = true;
   texture.name = 'Turf, gravel, loam and microrelief';
   texture.userData.physicalSurfaces = physicalSurfaces;
+  texture.userData.contactOcclusion = contactOcclusion;
   return texture;
 }
 
-export function groundMaterial(detail, options = {}) {
-  const physical = detail.userData.physicalSurfaces === true;
+export function groundMaterial(detail, options = {}, { wetSoil = false, receiveContacts = false } = {}) {
+  const physical = wetSoil || detail.userData.physicalSurfaces === true;
+  const heightFog = Boolean(detail.userData.contactOcclusion);
+  const contact = receiveContacts && detail.userData.contactOcclusion;
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: .93,
     ...options
   });
   // Custom shader uniforms are outside MeshStandardMaterial's texture fields.
-  material.userData.ownedTextures = [detail];
+  material.userData.ownedTextures = contact ? [detail, contact.texture] : [detail];
   material.onBeforeCompile = shader => {
     shader.uniforms.landDetail = { value: detail };
+    if (contact) {
+      shader.uniforms.contactOcclusionMap = { value: contact.texture };
+      shader.uniforms.contactOcclusionArea = { value: contact.area };
+    }
+    const wetVarying = wetSoil ? 'varying float vLandWetness;' : '';
     shader.vertexShader = `
       attribute vec3 landCover;
+      ${wetSoil ? 'attribute float landWetness;' : ''}
+      ${wetVarying}
       varying vec3 vLandPosition;
       varying vec3 vLandCover;
       varying vec3 vLandNormal;
@@ -69,9 +80,12 @@ export function groundMaterial(detail, options = {}) {
       vLandPosition = position;
       vLandCover = landCover;
       vLandNormal = normal;
+      ${wetSoil ? 'vLandWetness = landWetness;' : ''}
     `);
     shader.fragmentShader = `
       uniform sampler2D landDetail;
+      ${contact ? 'uniform sampler2D contactOcclusionMap; uniform vec4 contactOcclusionArea;' : ''}
+      ${wetVarying}
       varying vec3 vLandPosition;
       varying vec3 vLandCover;
       varying vec3 vLandNormal;
@@ -109,12 +123,26 @@ export function groundMaterial(detail, options = {}) {
       diffuseColor.rgb *= (1.0 - wetStone * .135) * (1.0 + (pore - .42) * .22 * groundFade);
       landDisplacement = landDisplacement * .72 + (pore - .42) * .0044 * groundFade;
       ` : ''}
+      ${wetSoil ? `
+      float dampRim = clamp(vLandWetness * (.86 + .31 * spots.g), 0., 1.);
+      diffuseColor.rgb *= mix(vec3(1.), vec3(.58, .62, .66), dampRim);
+      landDisplacement += (grit.a - .42) * .016 * groundFade * mix(.50, 1., loam);
+      ` : ''}
     `).replace('#include <roughnessmap_fragment>', `
       #include <roughnessmap_fragment>
       ${physical ? 'roughnessFactor = clamp(roughnessFactor + (pore - .47) * .26 * groundFade - wetStone * .34, .49, 1.0);' : ''}
+      ${wetSoil ? 'roughnessFactor = mix(roughnessFactor, mix(.19, .29, pore), dampRim);' : ''}
     `).replace('#include <aomap_fragment>', `
       #include <aomap_fragment>
       ${physical ? 'reflectedLight.indirectDiffuse *= 1.0 - (1.0 - smoothstep(.25, .44, grit.a)) * .11 * groundFade;' : ''}
+      ${contact ? `
+        vec2 contactUV = (vLandPosition.xz - contactOcclusionArea.xy) / contactOcclusionArea.zw;
+        vec2 contactInside = step(vec2(0.), contactUV) * step(contactUV, vec2(1.));
+        float contactFactor = mix(1., texture2D(contactOcclusionMap, contactUV).r, contactInside.x * contactInside.y);
+        reflectedLight.indirectDiffuse *= contactFactor;
+        reflectedLight.indirectSpecular *= mix(.35, 1., contactFactor);
+        reflectedLight.directDiffuse *= mix(.82, 1., contactFactor);
+      ` : ''}
     `).replace('#include <normal_fragment_maps>', `
       #include <normal_fragment_maps>
       vec3 landDx = dFdx(-vViewPosition), landDy = dFdy(-vViewPosition);
@@ -123,7 +151,8 @@ export function groundMaterial(detail, options = {}) {
       vec3 landGradient = sign(landDet) * (dFdx(landDisplacement) * landRx + dFdy(landDisplacement) * landRy);
       normal = normalize(max(abs(landDet), 1e-7) * normal - landGradient * (1. - strata * .64));
     `);
+    if (heightFog) applyHeightFog(shader);
   };
-  material.customProgramCacheKey = () => physical ? 'valley-terrain-physical' : 'valley-terrain-original';
+  material.customProgramCacheKey = () => `valley-terrain-${physical}-${wetSoil}-${Boolean(contact)}-${heightFog}`;
   return material;
 }

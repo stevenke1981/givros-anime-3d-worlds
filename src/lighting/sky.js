@@ -2,8 +2,9 @@ import {
   Color, DataTexture, DataUtils, EquirectangularReflectionMapping,
   HalfFloatType, LinearFilter, LinearSRGBColorSpace, RGBAFormat,
 } from 'three';
+import { cloudLayerCoverage } from './sky-clouds.js';
 
-export function createSkyRadiance(profile, sunDirection, sunColor, width = 256) {
+export function createSkyRadiance(profile, sunDirection, sunColor, width = 256, naturalLighting = false) {
   const [zenith, horizon, ground] = profile.sky.map((hex) => new Color(hex));
   const height = width / 2;
   const data = new Uint16Array(width * height * 4);
@@ -18,15 +19,16 @@ export function createSkyRadiance(profile, sunDirection, sunColor, width = 256) 
 
     for (let column = 0; column < width; column++) {
       const longitude = Math.PI * 2 * ((column + .5) / width - .5);
-      const cosAngle = radial * (Math.cos(longitude) * sunDirection.x +
-        Math.sin(longitude) * sunDirection.z) + y * sunDirection.y;
+      const x = radial * Math.cos(longitude), z = radial * Math.sin(longitude);
+      const cosAngle = x * sunDirection.x + z * sunDirection.z + y * sunDirection.y;
+      const clouds = naturalLighting ? cloudLayerCoverage(x, y, z) * .9 : 0;
       const halo = Math.exp((cosAngle - 1) * 18) * profile.sunRadiance * .024;
       const disk = Math.max(0, (cosAngle - sunDisk) / (1 - sunDisk)) * profile.sunRadiance;
       const sun = halo + disk;
       const index = (row * width + column) * 4;
-      data[index] = toHalf(tint.r + sun * sunColor.r);
-      data[index + 1] = toHalf(tint.g + sun * sunColor.g);
-      data[index + 2] = toHalf(tint.b + sun * sunColor.b);
+      data[index] = toHalf(tint.r * (1 - clouds) + 1.16 * clouds + sun * sunColor.r);
+      data[index + 1] = toHalf(tint.g * (1 - clouds) + 1.14 * clouds + sun * sunColor.g);
+      data[index + 2] = toHalf(tint.b * (1 - clouds) + 1.08 * clouds + sun * sunColor.b);
       data[index + 3] = toHalf(1);
     }
   }

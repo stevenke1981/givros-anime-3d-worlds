@@ -3,6 +3,7 @@ import {
 } from 'three';
 import { createGaussianDetail } from './detail/gaussian-detail.js';
 import { createLightingPipeline, hasLightingProfile } from './lighting/pipeline.js';
+import { supportsNaturalLighting } from './lighting/daylight.js';
 import { scenes } from './world/catalog.js';
 import { disposeScene } from './world/dispose-scene.js';
 import { advanceWalker, EYE_HEIGHT } from './walk.js';
@@ -259,7 +260,9 @@ async function loadRequestedScenes() {
       };
       const useBakedMaterials = !legacyLighting && hasLightingProfile(descriptor.id);
       const physicalSurfaces = useBakedMaterials && options.get('surface') !== 'legacy';
-      const worldOptions = { renderer, onProgress: progress, useBakedMaterials, physicalSurfaces };
+      const naturalLighting = physicalSurfaces && supportsNaturalLighting(descriptor.id) &&
+        options.get('daylight') !== 'baseline';
+      const worldOptions = { renderer, onProgress: progress, useBakedMaterials, physicalSurfaces, naturalLighting, coarse };
       next = descriptor.id === '01'
         ? await module.createSakuraWorld(worldOptions)
         : await module.createRegionalWorld(descriptor.id, worldOptions);
@@ -275,7 +278,7 @@ async function loadRequestedScenes() {
           }
         });
       }
-      const lightingMode = lighting.apply(next.scene, descriptor.id, physicalSurfaces);
+      const lightingMode = lighting.apply(next.scene, descriptor.id, physicalSurfaces, naturalLighting);
       const detail = options.get('splats') === 'off' ? undefined : createGaussianDetail(next.scene, {
         detailScale: coarse ? 0.56 : 1,
         report: traceSplats ? (counts) => { canvas.dataset.gaussianCounts = JSON.stringify(counts); } : undefined,
@@ -298,6 +301,7 @@ async function loadRequestedScenes() {
       explorer.dataset.scene = descriptor.id;
       explorer.dataset.lighting = lightingMode;
       explorer.dataset.surface = physicalSurfaces ? 'physical' : 'legacy';
+      explorer.dataset.daylight = naturalLighting ? 'natural' : 'baseline';
       explorer.dataset.state = 'ready';
       canvas.setAttribute('aria-label', descriptor.name + '即時 3D 場景');
       document.title = descriptor.name + '｜十景漫步';
