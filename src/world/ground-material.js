@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { surfaceDetailGLSL } from './surface-material.js';
 
 function repeatValue(x, z, period, seed) {
   const ix = Math.floor(x), iz = Math.floor(z);
@@ -14,7 +15,7 @@ function repeatValue(x, z, period, seed) {
   return low * (1 - sz) + high * sz;
 }
 
-export function createGroundDetail() {
+export function createGroundDetail(physicalSurfaces = false) {
   // Pack individual material signals and relief into a periodic data map. Use nonmatching
   // physical scales in the shader so the same tile never reads as a repeated patch.
   const size = 256;
@@ -42,10 +43,12 @@ export function createGroundDetail() {
   texture.anisotropy = 4;
   texture.needsUpdate = true;
   texture.name = 'Turf, gravel, loam and microrelief';
+  texture.userData.physicalSurfaces = physicalSurfaces;
   return texture;
 }
 
 export function groundMaterial(detail, options = {}) {
+  const physical = detail.userData.physicalSurfaces === true;
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: .93,
@@ -59,16 +62,20 @@ export function groundMaterial(detail, options = {}) {
       attribute vec3 landCover;
       varying vec3 vLandPosition;
       varying vec3 vLandCover;
+      varying vec3 vLandNormal;
       ${shader.vertexShader}
     `.replace('#include <begin_vertex>', `
       #include <begin_vertex>
       vLandPosition = position;
       vLandCover = landCover;
+      vLandNormal = normal;
     `);
     shader.fragmentShader = `
       uniform sampler2D landDetail;
       varying vec3 vLandPosition;
       varying vec3 vLandCover;
+      varying vec3 vLandNormal;
+      ${physical ? surfaceDetailGLSL : ''}
       ${shader.fragmentShader}
     `.replace('#include <color_fragment>', `
       #include <color_fragment>
@@ -76,7 +83,9 @@ export function groundMaterial(detail, options = {}) {
       float gravel = vLandCover.y;
       float strata = vLandCover.z;
       vec2 coords = vLandPosition.xz + vec2(.39, .59) * vLandPosition.y * strata;
-      vec4 grit = texture2D(landDetail, coords * .26);
+      vec4 grit = ${physical
+        ? 'surfaceTriplanar(landDetail, vLandPosition * .53, vLandNormal)'
+        : 'texture2D(landDetail, coords * .26)'};
       vec4 mottle = texture2D(landDetail, mat2(.8, -.6, .6, .8) * coords * .069);
       vec4 spots = texture2D(landDetail, (coords + vec2(31.4, 12.1)) * vec2(.14, .42));
       float flecks = smoothstep(.43, .67, grit.r + (mottle.b - .5) * .13);
@@ -92,6 +101,20 @@ export function groundMaterial(detail, options = {}) {
       diffuseColor.rgb += vec3(.075,.061,.044) * flecks * loam * (1. - gravel);
       float landDisplacement = (grit.a - .4) * mix(.030, .020, loam) +
         (spots.g - .5) * mix(.035, .010, loam);
+      ${physical ? `
+      float groundFade = 1.0 - smoothstep(.10, .48,
+        max(length(dFdx(vLandPosition)), length(dFdy(vLandPosition))));
+      float wetStone = smoothstep(.46, .86, mottle.r + gravel * .28) * gravel;
+      float pore = texture2D(landDetail, coords * 2.34).r;
+      diffuseColor.rgb *= (1.0 - wetStone * .135) * (1.0 + (pore - .42) * .22 * groundFade);
+      landDisplacement = landDisplacement * .72 + (pore - .42) * .0044 * groundFade;
+      ` : ''}
+    `).replace('#include <roughnessmap_fragment>', `
+      #include <roughnessmap_fragment>
+      ${physical ? 'roughnessFactor = clamp(roughnessFactor + (pore - .47) * .26 * groundFade - wetStone * .34, .49, 1.0);' : ''}
+    `).replace('#include <aomap_fragment>', `
+      #include <aomap_fragment>
+      ${physical ? 'reflectedLight.indirectDiffuse *= 1.0 - (1.0 - smoothstep(.25, .44, grit.a)) * .11 * groundFade;' : ''}
     `).replace('#include <normal_fragment_maps>', `
       #include <normal_fragment_maps>
       vec3 landDx = dFdx(-vViewPosition), landDy = dFdy(-vViewPosition);
@@ -101,5 +124,6 @@ export function groundMaterial(detail, options = {}) {
       normal = normalize(max(abs(landDet), 1e-7) * normal - landGradient * (1. - strata * .64));
     `);
   };
+  material.customProgramCacheKey = () => physical ? 'valley-terrain-physical' : 'valley-terrain-original';
   return material;
 }

@@ -2,12 +2,15 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
   canWalk, crossings, groundAt, houseFloors, houses, laneDistance, mix, paddies, paddyShape,
-  riverCenter, riverWidth, shrine, stairHeight, steps, surfaceAt as surfaceY, torii
+  riverCenter, riverLevel, riverWidth, shrine, stairHeight, steps, surfaceAt as surfaceY, torii
 } from './layout.js';
 import { addMountains, addSky, addTerrain, addWater, randomSequence, sunDirection } from './landscape.js';
 import { createGroundDetail } from './ground-material.js';
 import { plantUnderstory } from './understory.js';
 import { modelPath } from './model-path.js';
+import { applyAssetSurfaces } from './surface-material.js';
+import { addSurfaceDetailGeometry } from './surface-detail-geometry.js';
+import { createVegetationWind } from './vegetation-wind.js';
 
 const assetNames = [
   'house', 'bridge', 'torii', 'shrine', 'sakura', 'cedar', 'cedar-lod',
@@ -23,7 +26,10 @@ async function loadAssets(onProgress, useBakedMaterials) {
     scene.updateMatrixWorld(true);
     const parts = [];
     scene.traverse(part => {
-      if (part.isMesh) parts.push(part);
+      if (part.isMesh) {
+        part.userData.surfaceAsset = name;
+        parts.push(part);
+      }
     });
     if (!parts.length) throw new Error(`No mesh found in ${name}.glb`);
     onProgress(.07 + .57 * (++loaded / assetNames.length), '載入 Blender 資產');
@@ -39,6 +45,7 @@ function batchAsset(scene, parts, placements, { castShadow = true, receiveShadow
   for (const part of parts) {
     const instances = new THREE.InstancedMesh(part.geometry, part.material, placements.length);
     instances.name = part.name;
+    instances.userData.surfaceAsset = part.userData.surfaceAsset;
     if (assetId) instances.userData.assetId = assetId;
     if (gaussianKind && (gaussianKind === 'shrub' || /foliage|leaves|plume|spray/i.test(part.name + part.material.name))) {
       instances.userData.gaussianKind = gaussianKind;
@@ -317,7 +324,9 @@ function addPetals(scene, blossomSites) {
   };
 }
 
-export async function createSakuraWorld({ renderer, onProgress = () => {}, useBakedMaterials = false } = {}) {
+export async function createSakuraWorld({
+  renderer, onProgress = () => {}, useBakedMaterials = false, physicalSurfaces = false,
+} = {}) {
   onProgress(.07, '準備春櫻山村');
   const assets = await loadAssets(onProgress, useBakedMaterials);
   const scene = new THREE.Scene();
@@ -339,13 +348,23 @@ export async function createSakuraWorld({ renderer, onProgress = () => {}, useBa
   if (renderer?.shadowMap) renderer.shadowMap.enabled = true;
 
   onProgress(.69, '雕塑河谷與梯田');
-  const groundDetail = createGroundDetail();
+  const groundDetail = createGroundDetail(physicalSurfaces);
   addSky(scene);
   addMountains(scene, groundDetail);
   addTerrain(scene, groundDetail);
   const water = addWater(scene);
   onProgress(.87, '排列村墅、竹林與春櫻');
   const { blossomSites, blocked } = populate(scene, assets);
+  const wind = physicalSurfaces ? createVegetationWind() : undefined;
+  if (wind) {
+    applyAssetSurfaces(scene, groundDetail);
+    scene.traverse(mesh => wind.register(mesh, mesh.userData.surfaceAsset));
+    addSurfaceDetailGeometry(scene, {
+      groundAt, center: [22.2, 1.76], seed: 24118,
+      canPlace: (x, z) => canWalk(x, z) && !blocked(x, z) && laneDistance(x, z) < 4 &&
+        groundAt(x, z) > riverLevel(z) + .1 && Math.abs(surfaceY(x, z) - groundAt(x, z)) < .1,
+    });
+  }
   const petals = addPetals(scene, blossomSites);
   petals(0, false);
 
@@ -377,6 +396,7 @@ export async function createSakuraWorld({ renderer, onProgress = () => {}, useBa
     canWalk: (x,z) => canWalk(x,z) && !blocked(x,z),
     update(elapsedSeconds, _deltaSeconds, reducedMotion) {
       water.value = reducedMotion ? 0 : elapsedSeconds;
+      wind?.update(elapsedSeconds, reducedMotion);
       petals(elapsedSeconds, reducedMotion);
     }
   };

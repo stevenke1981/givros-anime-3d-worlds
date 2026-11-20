@@ -23,20 +23,22 @@ export function createLightingPipeline(renderer, { legacy = false, coarse = fals
     return configured.has(scene) ? (hdrTargetSupported ? 'hdr-post' : 'aces-direct') : 'legacy';
   }
 
-  function apply(scene, id) {
+  function apply(scene, id, physicalSurfaces = false) {
     if (legacy || !hasLightingProfile(id) || configured.has(scene)) return mode(scene);
     const profile = lightingProfiles[id];
     const { environment, environmentIntensity } = scene;
     const lights = [];
+    const water = new Set();
     let sun;
     scene.traverse((node) => {
       if (node.isDirectionalLight && (!sun || sun.intensity < node.intensity)) sun = node;
       if (node.isHemisphereLight) lights.push([node, node.intensity]);
+      if (physicalSurfaces && node.material?.userData.waterEnvironment) water.add(node.material);
     });
     let radiance;
     if (sun && hdrTargetSupported) {
       const direction = sun.getWorldPosition(new Vector3()).sub(sun.target.getWorldPosition(new Vector3())).normalize();
-      const sky = createSkyRadiance(profile, direction, sun.color);
+      const sky = createSkyRadiance(profile, direction, sun.color, physicalSurfaces && !coarse ? 512 : 256);
       pmrem ??= new PMREMGenerator(renderer);
       try {
         radiance = pmrem.fromEquirectangular(sky);
@@ -45,13 +47,20 @@ export function createLightingPipeline(renderer, { legacy = false, coarse = fals
       }
       scene.environment = radiance.texture;
       scene.environmentIntensity = profile.environment;
+      for (const material of water) {
+        material.defines.USE_WATER_ENVIRONMENT = 1;
+        material.uniforms.waterEnvironment = { value: radiance.texture };
+        material.uniforms.waterEnvironmentMaxLod = { value: radiance.texture.mipmaps.length - 1 };
+        material.uniforms.waterEnvironmentIntensity = { value: scene.environmentIntensity };
+        material.needsUpdate = true;
+      }
       for (const [light, intensity] of lights) light.intensity = intensity * profile.hemisphere;
     }
     if (sun) {
       lights.push([sun, sun.intensity]);
       sun.intensity *= profile.direct;
     }
-    configured.set(scene, { profile, environment, environmentIntensity, lights, radiance });
+    configured.set(scene, { profile, environment, environmentIntensity, lights, radiance, water });
     return mode(scene);
   }
 
@@ -172,6 +181,15 @@ export function createLightingPipeline(renderer, { legacy = false, coarse = fals
     scene.environment = state.environment;
     scene.environmentIntensity = state.environmentIntensity;
     for (const [light, intensity] of state.lights) light.intensity = intensity;
+    if (state.radiance) {
+      for (const material of state.water) {
+        delete material.defines.USE_WATER_ENVIRONMENT;
+        delete material.uniforms.waterEnvironment;
+        delete material.uniforms.waterEnvironmentMaxLod;
+        delete material.uniforms.waterEnvironmentIntensity;
+        material.needsUpdate = true;
+      }
+    }
     state.radiance?.dispose();
     configured.delete(scene);
   }

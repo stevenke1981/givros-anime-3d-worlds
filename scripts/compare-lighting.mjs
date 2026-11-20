@@ -4,11 +4,13 @@ import { resolve } from 'node:path';
 import { chromium } from '@playwright/test';
 import { preview } from 'vite';
 
-const destination = resolve('release/lighting-comparison');
+const compareSurfaces = process.argv.includes('--surfaces');
+const destination = resolve(compareSurfaces ? 'release/physical-surface-comparison' : 'release/lighting-comparison');
 const shots = [
   ['01', 'meadow', 'sakura-creek'],
   ['04', 'trail', 'rice-terraces'],
 ];
+if (compareSurfaces) shots.push(['08', 'waterfront', 'coastal-waterfront']);
 if (process.argv.includes('--night')) shots.push(['10', 'trail', 'festival-night']);
 await mkdir(destination, { recursive: true });
 
@@ -29,11 +31,17 @@ try {
   for (const [scene, view, name] of shots) {
     const captures = [];
     for (const lighting of ['legacy', 'enhanced']) {
-      await page.goto(`${site}?scene=${scene}&lighting=${lighting}&trace-lighting`);
+      const variant = compareSurfaces ? `surface=${lighting}` : `lighting=${lighting}`;
+      await page.goto(`${site}?scene=${scene}&${variant}&trace-lighting`);
       await page.locator(`#explorer[data-state="ready"][data-scene="${scene}"]`).waitFor({ timeout: 90_000 });
       const selected = page.locator(`[data-view="${view}"]`);
       if (await selected.getAttribute('aria-pressed') !== 'true') await selected.click();
-      assert.equal(await page.locator('#explorer').getAttribute('data-lighting'), lighting === 'legacy' ? 'legacy' : 'hdr-post');
+      const explorer = page.locator('#explorer');
+      assert.equal(await explorer.getAttribute('data-lighting'),
+        !compareSurfaces && lighting === 'legacy' ? 'legacy' : 'hdr-post');
+      if (compareSurfaces) {
+        assert.equal(await explorer.getAttribute('data-surface'), lighting === 'legacy' ? 'legacy' : 'physical');
+      }
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const canvas = page.locator('#world');
       const pose = await canvas.getAttribute('data-camera-pose');
@@ -44,7 +52,7 @@ try {
     assert.deepEqual(JSON.parse(captures[0].pose), JSON.parse(captures[1].pose), `${name} camera`);
     assert.ok(!captures[0].image.equals(captures[1].image), `${name} lighting`);
     evidence.push({ scene, view, camera: JSON.parse(captures[0].pose), legacy: `${name}-legacy.png`, enhanced: `${name}-enhanced.png` });
-    console.log(`${name}: fixed camera verified, legacy and HDR+ACES captured`);
+    console.log(`${name}: fixed camera verified, ${compareSurfaces ? 'physical surfaces' : 'HDR+ACES'} comparison captured`);
   }
   assert.deepEqual(errors, []);
   await writeFile(resolve(destination, 'camera-poses.json'), JSON.stringify(evidence, null, 2) + '\n');

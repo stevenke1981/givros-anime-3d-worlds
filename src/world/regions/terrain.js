@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createGroundDetail, groundMaterial } from '../ground-material.js';
 import { mix, paddyShape, smooth } from '../layout.js';
 import { randomSequence } from '../landscape.js';
+import { waterEnvironmentGLSL } from '../../lighting/water-environment.js';
 
 function grid(w, h, sample, material) {
   const positions = [], colors = [], covers = [], edges = [], gaussianWeights = [], indices = [];
@@ -64,7 +65,7 @@ float noise(vec2 p) {
 }
 `;
 
-export function addAtmosphere(scene, layout) {
+export function addAtmosphere(scene, layout, physicalSurfaces = false) {
   const { spec } = layout;
   const [, , , , skyColor, ambient, warm] = spec.colors;
   scene.background = new THREE.Color(skyColor);
@@ -100,7 +101,10 @@ export function addAtmosphere(scene, layout) {
         vec3 color=mix(horizon,zenith,smoothstep(-.07,.52,rise));
         float facing=max(dot(r,solar),0.); color+=light*.095*pow(facing,8.);
         color+=light*exp(-rise*26.)*dusk*.29;
-        vec2 p=vec2(atan(r.x,-r.z)*7.7,r.y*27.);
+        // Intersect the view ray with a horizontal cloud layer to keep the full sky continuous.
+        vec2 p=${physicalSurfaces
+          ? 'r.xz * (5.2 / max(.20, rise + .22)) + vec2(4.6, -3.2)'
+          : 'vec2(atan(r.x,-r.z)*7.7,r.y*27.)'};
         float m=noise(p)*.60+noise(p*2.21)*.25+noise(p*4.04)*.15;
         float cloud=smoothstep(.545,.70,m)*smoothstep(.025,.115,rise)*(1.-smoothstep(.45,.79,rise))*clouds;
         color=mix(color,mix(vec3(.77,.83,.87),vec3(.42,.47,.61),dusk),cloud);
@@ -116,14 +120,14 @@ export function addAtmosphere(scene, layout) {
   return sunDirection;
 }
 
-export function addTerrain(scene, layout) {
+export function addTerrain(scene, layout, physicalSurfaces = false) {
   const {id,spec,paddies,groundAt,routeBlend,riverEdge,seaEdge,waterAt} = layout;
   const seed = 619 + Number(id) * 37;
   const tuple = spec.colors.map(color => new THREE.Color(color));
   const [grass,shade,dry,path] = tuple;
   const rock = new THREE.Color(spec.snow ? '#a2adb8' : spec.coast ? '#929385' : '#858981');
   const soil = new THREE.Color(spec.snow ? '#87958f' : '#716348');
-  const turfDetail = createGroundDetail();
+  const turfDetail = createGroundDetail(physicalSurfaces);
   const turf = grid(274,250,(u,v)=>{
     function map(n,min,max) {
       if (n < .118) return min - 58 * (1 - n/.118) ** 1.68;
@@ -198,6 +202,7 @@ export function addTerrain(scene, layout) {
     massif.userData.gaussianKind='mountain';
     scene.add(massif);
   }
+  return turfDetail;
 }
 
 function surfaceMaterial(clock, sun, spec, kind, floodedSoil) {
@@ -208,6 +213,7 @@ function surfaceMaterial(clock, sun, spec, kind, floodedSoil) {
   return new THREE.ShaderMaterial({
     defines: floodedSoil ? { FLOODED_SOIL: 1 } : {},
     side:THREE.DoubleSide,
+    userData:{waterEnvironment:true},
     uniforms:{clock:{value:clock.value},sun:{value:sun},deep:{value:new THREE.Color(colors[0])},
       shallows:{value:new THREE.Color(colors[1])},skyTint:{value:new THREE.Color(spec.colors[4])},
       flow:{value:still?(kind==='lake'?.07:.18):drained?.04:.37},
@@ -220,28 +226,38 @@ function surfaceMaterial(clock, sun, spec, kind, floodedSoil) {
       uniform vec3 sun,deep,shallows,skyTint;
       varying vec3 pos; varying float edge;
       ${cloudNoise}
+      ${waterEnvironmentGLSL}
       void main(){
         vec2 uv=pos.xz-vec2(0.,clock*flow);
         float m=noise(uv*vec2(.32,.66)), ripples=noise(uv*vec2(.88,2.9)+m*.76);
         float grit=noise(uv*vec2(2.25,6.3)+m*.32);
         vec3 n=normalize(vec3(.11*(ripples-.5),1.,.125*(grit-.5)));
         vec3 eye=normalize(cameraPosition-pos);
-        float glass=pow(1.-clamp(dot(n,eye),0.,1.),3.);
         float littoral=smoothstep(.38,1.,edge);
-        float shadowBank=smoothstep(.50,1.02,edge)*noise(uv*vec2(.25,.53)+n.xz*11.);
-        vec3 tint=mix(skyTint*.77,skyTint,clamp(.24+glass*.70,0.,1.));
-        tint=mix(tint,deep*.61,shadowBank*.82);
         vec3 body=mix(deep,shallows,.075+littoral*.67+m*.18);
-        body=mix(body,tint,min(.82,reflection*(.16+glass*.93)));
+        #ifndef USE_WATER_ENVIRONMENT
+          float glass=pow(1.-clamp(dot(n,eye),0.,1.),3.);
+          float shadowBank=smoothstep(.50,1.02,edge)*noise(uv*vec2(.25,.53)+n.xz*11.);
+          vec3 tint=mix(skyTint*.77,skyTint,clamp(.24+glass*.70,0.,1.));
+          tint=mix(tint,deep*.61,shadowBank*.82);
+          body=mix(body,tint,min(.82,reflection*(.16+glass*.93)));
+        #endif
         #ifdef FLOODED_SOIL
           float shelf=smoothstep(.62,1.,edge+.095*(grit-.5));
           vec3 mud=mix(vec3(.085,.101,.058),vec3(.24,.197,.106),.20+m*.24+shelf*.48);
-          vec3 reflected=reflect(-eye,n);
-          float openSky=smoothstep(.015,.30,reflected.y);
-          float haze=smoothstep(.35,.74,noise(reflected.xz*6.+uv*.12));
-          vec3 sky=mix(vec3(.11,.17,.11),skyTint,openSky);
-          sky=mix(sky,vec3(.68,.74,.77),openSky*haze*.34);
-          body=mix(mud,sky,(.28+glass*.56)*(1.-shelf*.57));
+          #ifdef USE_WATER_ENVIRONMENT
+            body=mud;
+          #else
+            vec3 reflected=reflect(-eye,n);
+            float openSky=smoothstep(.015,.30,reflected.y);
+            float haze=smoothstep(.35,.74,noise(reflected.xz*6.+uv*.12));
+            vec3 sky=mix(vec3(.11,.17,.11),skyTint,openSky);
+            sky=mix(sky,vec3(.68,.74,.77),openSky*haze*.34);
+            body=mix(mud,sky,(.28+glass*.56)*(1.-shelf*.57));
+          #endif
+        #endif
+        #ifdef USE_WATER_ENVIRONMENT
+          body=reflectWater(body,n,eye,.055+.075*ripples+.05*surf+.025*littoral);
         #endif
         float sunlight=pow(max(0.,dot(reflect(-sun,n),eye)),117.)*(.30+m*.58);
         float glints=smoothstep(.86,.985,grit)*smoothstep(.19,.75,m);

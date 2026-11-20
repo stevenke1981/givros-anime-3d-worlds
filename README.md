@@ -51,4 +51,8 @@ Gaussian 細節取樣自枝葉、草地和山體的實際網格，沿表面投�
 
 在同一 URL 加上 `lighting=legacy` 可回到舊渲染與 GLB，`ao=off` 可單獨檢查烘焙遮蔽。先建置，再執行 `npm run compare:lighting`，即可在 `release/lighting-comparison/` 產生溪岸、梯田與夜祭的固定鏡位對照。
 
+地表和 Blender 構件共用一張線性程序細節貼圖。地形以三平面投影補上土壤、濕石與山壁的微表面，構件按材質疊加細紋並保留原有貼圖與 Cycles AO。金屬度變化用於外露五金。河流、田水、湖和海採樣各景的 HDR 環境反射，葉片與草梢依風擺動並遵循系統的減少動態效果設定。
+
+保留 HDR 與烘焙材質的對照模式為 `?surface=legacy`。建置後執行 `npm run compare:lighting -- --surfaces` 可在 `release/physical-surface-comparison/` 取得溪岸、梯田、海岬和夜祭的固定鏡位截圖與相機座標。
+
 十組設計原稿與提示詞使用方式見[繁體中文提示詞指南](README_繁體中文.md)。

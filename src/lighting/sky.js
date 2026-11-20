@@ -3,9 +3,9 @@ import {
   HalfFloatType, LinearFilter, LinearSRGBColorSpace, RGBAFormat,
 } from 'three';
 
-export function createSkyRadiance(profile, sunDirection, sunColor) {
+export function createSkyRadiance(profile, sunDirection, sunColor, width = 256) {
   const [zenith, horizon, ground] = profile.sky.map((hex) => new Color(hex));
-  const width = 256, height = 128;
+  const height = width / 2;
   const data = new Uint16Array(width * height * 4);
   const toHalf = DataUtils.toHalfFloat;
   const tint = new Color();

@@ -28,7 +28,10 @@ export async function loadRegionalAssets(layout, onProgress, useBakedMaterials) 
     scene.updateMatrixWorld(true);
     const parts=[];
     scene.traverse(node=>{
-      if (node.isMesh) parts.push(node);
+      if (node.isMesh) {
+        node.userData.surfaceAsset = name;
+        parts.push(node);
+      }
     });
     if (!parts.length) throw new Error(`No mesh found in ${name}.glb`);
     onProgress(.08+.52*(++loaded/names.size),'載入地區模型');
@@ -43,6 +46,7 @@ function addInstances(group, parts, placement, castShadow, kind) {
   for (const part of parts) {
     const batch=new THREE.InstancedMesh(part.geometry,part.material,placement.length);
     batch.name=part.name;
+    batch.userData.surfaceAsset=part.userData.surfaceAsset;
     batch.castShadow=castShadow;
     batch.receiveShadow=true;
     const sourceName = part.userData.name ?? part.name;

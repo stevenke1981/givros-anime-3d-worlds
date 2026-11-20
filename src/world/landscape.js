@@ -4,6 +4,7 @@ import {
   riverWidth, smooth
 } from './layout.js';
 import { groundMaterial } from './ground-material.js';
+import { waterEnvironmentGLSL } from '../lighting/water-environment.js';
 
 export function randomSequence(initialSeed) {
   let seed = initialSeed >>> 0;
@@ -206,6 +207,7 @@ export function addWater(scene) {
   const clock = { value: 0 };
   const waterMaterial = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
+    userData: { waterEnvironment: true },
     uniforms: {
       clock, sun: { value: sunDirection },
       deep: { value: new THREE.Color('#117488') },
@@ -227,6 +229,7 @@ export function addWater(scene) {
       uniform vec4 basinBounds;
       varying vec3 wPos;
       ${noiseGLSL}
+      ${waterEnvironmentGLSL}
       void main() {
         float z = wPos.z, x = wPos.x, t = clock;
         float center = 2.7*sin((z-1.)*.092) + .65*sin((z-1.)*.24)
@@ -247,11 +250,15 @@ export function addWater(scene) {
         body = mix(body, bed, shoal * .56 * (1. - isPaddy));
         vec3 view = normalize(cameraPosition - wPos);
         vec3 norm = normalize(vec3(.026 * wind, 1., .041 * wind + .05 * (vein-.5)));
-        float fresnel = pow(1. - max(dot(view, norm),0.),3.);
-        float reflectedClouds = noise(vec2(x*.16, z*.22) + norm.xz * 22.) * .24;
-        float reflectedBanks = smoothstep(.35,.97,edge) * noise(vec2(z*.37,x*.46) + norm.xz*16.);
-        vec3 reflected = mix(reflection, vec3(.16,.27,.22), reflectedBanks * .82 * (1. - isPaddy));
-        body = mix(body, reflected, min(.73, .08 + fresnel*.57 + reflectedClouds * fresnel));
+        #ifdef USE_WATER_ENVIRONMENT
+          body = reflectWater(body, norm, view, .08 + wide * .075);
+        #else
+          float fresnel = pow(1. - max(dot(view, norm),0.),3.);
+          float reflectedClouds = noise(vec2(x*.16, z*.22) + norm.xz * 22.) * .24;
+          float reflectedBanks = smoothstep(.35,.97,edge) * noise(vec2(z*.37,x*.46) + norm.xz*16.);
+          vec3 reflected = mix(reflection, vec3(.16,.27,.22), reflectedBanks * .82 * (1. - isPaddy));
+          body = mix(body, reflected, min(.73, .08 + fresnel*.57 + reflectedClouds * fresnel));
+        #endif
         float streak = smoothstep(.82,.97,vein + .045 * wind) * smoothstep(.35,.86,wide);
         float foam = smoothstep(.92,1.03,edge) * smoothstep(.60,.80,vein) * (1. - isPaddy);
         float glint = pow(max(0.,dot(reflect(-sun,norm),view)),110.) * (.26 + wide * .58);
@@ -261,12 +268,16 @@ export function addWater(scene) {
           float radius = pow(pow(local.x, 3.5) + pow(local.y, 3.5), 1. / 3.5);
           float shelf = smoothstep(.70,.97,radius + .05 * (sediments - .5));
           vec3 muddyBed = mix(deep, shallow, clamp(.33 * sediments + .59 * shelf, 0., 1.));
-          vec3 reflectedRay = reflect(-view, norm);
-          float skyBand = smoothstep(.02,.32,reflectedRay.y);
-          float reflectedHaze = smoothstep(.30,.78,noise(reflectedRay.xz * 2.2 + wPos.xz * .18));
-          vec3 stillSky = mix(vec3(.10,.16,.115), reflection, skyBand);
-          stillSky = mix(stillSky, vec3(.67,.76,.81), reflectedHaze * skyBand * .33);
-          body = mix(muddyBed, stillSky, (.25 + fresnel * .63) * (1. - shelf * .52));
+          #ifdef USE_WATER_ENVIRONMENT
+            body = reflectWater(muddyBed, norm, view, .055 + shelf * .13);
+          #else
+            vec3 reflectedRay = reflect(-view, norm);
+            float skyBand = smoothstep(.02,.32,reflectedRay.y);
+            float reflectedHaze = smoothstep(.30,.78,noise(reflectedRay.xz * 2.2 + wPos.xz * .18));
+            vec3 stillSky = mix(vec3(.10,.16,.115), reflection, skyBand);
+            stillSky = mix(stillSky, vec3(.67,.76,.81), reflectedHaze * skyBand * .33);
+            body = mix(muddyBed, stillSky, (.25 + fresnel * .63) * (1. - shelf * .52));
+          #endif
           body += vec3(.12,.15,.14) * (streak * .23 + glint);
         }
         gl_FragColor = vec4(body,1.);
