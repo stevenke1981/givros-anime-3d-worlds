@@ -51,4 +51,16 @@ Gaussian 細節取樣自枝葉、草地和山體的實際網格，沿表面投�
 
 在同一 URL 加上 `lighting=legacy` 可回到舊渲染與 GLB，`ao=off` 可單獨檢查烘焙遮蔽。先建置，再執行 `npm run compare:lighting`，即可在 `release/lighting-comparison/` 產生溪岸、梯田與夜祭的固定鏡位對照。
 
+地表和 Blender 構件共用一張線性程序細節貼圖。地形以三平面投影補上土壤、濕石與山壁的微表面，構件按材質疊加細紋並保留原有貼圖與 Cycles AO。金屬度變化用於外露五金。河流、田水、湖和海採樣各景的 HDR 環境反射，葉片與草梢依風擺動並遵循系統的減少動態效果設定。
+
+保留 HDR 與烘焙材質的對照模式為 `?surface=legacy`。建置後執行 `npm run compare:lighting -- --surfaces` 可在 `release/physical-surface-comparison/` 取得溪岸、梯田、海岬和夜祭的固定鏡位截圖與相機座標。
+
+春櫻溪岸和梯田的日景使用斜射日光與單次更新的 PCF 柔影。地形、水面同時接收投影，地表接觸遮蔽依照每景構件的實際位置生成。水面以兩組漣漪取樣同一片 HDR 天空的雲層，梯田灌渠沿田埂下切並保留原有步行路線。
+
+`?daylight=baseline` 在這兩景保留上一版 PBR 渲染。執行 `npm run build` 與 `npm run compare:lighting -- --daylight` 可在 `release/daylight-comparison/` 取得溪岸、橋面、梯田入口與濕田的同鏡位對照。
+
+若要比對兩次正式建置，先保存舊版 `dist`，再以新版執行 `npm run build` 和 `node scripts/compare-lighting.mjs --baseline-dist <舊版目錄>`。四組實拍及相機座標會寫入 `release/creek-terrace-refinement/`。兩次拍攝都會開啟各版本預設的自然日光。
+
+溪岸與梯田的田水以鄰近地形及實際株位近似倒影。走到田邊可看到秧苗與浮萍，走向橋面可觀察掠射水光。遠林取自 Blender 杉木的兩個視角，近景使用立體樹模。植栽和遠林圖集的重建方式見 [Blender 素材說明](art/README.md)。
+
 十組設計原稿與提示詞使用方式見[繁體中文提示詞指南](README_繁體中文.md)。

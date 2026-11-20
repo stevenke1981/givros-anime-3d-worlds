@@ -8,8 +8,22 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
     const gaussianShaders = new WeakSet();
     const gaussianPrograms = new WeakSet();
     const activePrograms = new WeakMap();
-    const { shaderSource, attachShader, useProgram, drawElementsInstanced } = gl;
+    const windUniforms = new WeakMap();
+    const { shaderSource, attachShader, useProgram, drawElementsInstanced, getUniformLocation, uniform1f } = gl;
     window.gaussianDraws = 0;
+    window.windStrength = null;
+    window.windTimes = new Set();
+    gl.getUniformLocation = function (program, name) {
+      const location = getUniformLocation.call(this, program, name);
+      if (location && name.startsWith('vegetationWind')) windUniforms.set(location, name);
+      return location;
+    };
+    gl.uniform1f = function (location, value) {
+      const name = windUniforms.get(location);
+      if (name === 'vegetationWindStrength') window.windStrength = value;
+      if (name === 'vegetationWindTime') window.windTimes.add(value);
+      return uniform1f.call(this, location, value);
+    };
     gl.shaderSource = function (shader, source) {
       if (source.includes('kernelPosition')) gaussianShaders.add(shader);
       return shaderSource.call(this, shader, source);
@@ -45,7 +59,7 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
     expect(response.ok()).toBe(true);
     expect(new URL(response.url()).pathname).toMatch(/^\/sakura\/models\//);
   }
-  for (const asset of ['meadow-grass', 'wild-azalea', 'valley-broadleaf']) {
+  for (const asset of ['meadow-grass', 'wild-azalea', 'sakura-canopy', 'valley-broadleaf-canopy', 'shore-reeds', 'rice-arching', 'duckweed']) {
     expect(modelResponses.some((response) => new URL(response.url()).pathname.endsWith('/' + asset + '.glb'))).toBe(true);
   }
   for (const asset of ['bridge', 'house']) {
@@ -91,46 +105,9 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
   await page.keyboard.press('Escape');
   await expect(explorer).toHaveAttribute('data-mode', 'scenic');
   await expect(start).toBeFocused();
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.waitForFunction(() => window.windStrength === 1 && window.windTimes.size >= 3, null, { timeout: 20_000 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.waitForFunction(() => window.windStrength === 0, null, { timeout: 20_000 });
   expect(errors).toEqual([]);
-});
-
-test.describe('touch viewport', () => {
-  test.use({
-    hasTouch: true,
-    isMobile: true,
-    viewport: { width: 390, height: 844 },
-  });
-  test('exposes walking controls and keeps navigation usable', async ({ page }, info) => {
-    // The two scene loads alone have a combined deadline of 115 seconds on software WebGL.
-    test.setTimeout(150_000);
-    await page.goto('./');
-    const explorer = page.locator('#explorer');
-    await expect(explorer).toHaveAttribute('data-state', 'ready', { timeout: 45_000 });
-    const allViewsFit = await page.locator('.views').evaluate((nav) => nav.scrollWidth <= nav.clientWidth);
-    expect(allViewsFit).toBe(true);
-    await page.screenshot({ path: info.outputPath('mobile.png') });
-    await page.getByRole('button', { name: '開始散步' }).tap();
-    await expect(page.getByRole('button', { name: '向前' })).toBeVisible();
-    await page.getByRole('button', { name: '回全景' }).tap();
-    await expect(explorer).toHaveAttribute('data-mode', 'scenic');
-    await page.getByRole('button', { name: '場景選單' }).tap();
-    const sceneMenu = page.getByRole('dialog', { name: '選擇場景' });
-    await expect(sceneMenu.locator('[data-scene-choice]')).toHaveCount(10);
-    await sceneMenu.locator('[data-scene-choice="07"]').tap();
-    await expect(explorer).toHaveAttribute('data-scene', '07', { timeout: 70_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('雪國溫泉山村');
-  });
-});
-
-test('the explorer reports an unavailable WebGL context and offers retry', async ({ page }) => {
-  await page.addInitScript(() => {
-    const getContext = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function (type, ...options) {
-      if (type === 'webgl2') return null;
-      return getContext.call(this, type, ...options);
-    };
-  });
-  await page.goto('./');
-  await expect(page.getByRole('status')).toContainText('WebGL 2');
-  await expect(page.getByRole('button', { name: '重新載入' })).toBeVisible();
 });

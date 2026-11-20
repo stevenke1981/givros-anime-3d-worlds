@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import {
   groundAt, laneDistance, mix, paddies, paddyShape, riverCenter, riverLevel,
-  riverWidth, smooth
+  riverWidth, sakuraPathHalfWidth, smooth
 } from './layout.js';
 import { groundMaterial } from './ground-material.js';
+import { cloudLayerGLSL } from '../lighting/sky-clouds.js';
+import { waterEnvironmentGLSL } from '../lighting/water-environment.js';
+import { createWaterMaterial, setWaterDepth } from './water-material.js';
+import { createWaterSurroundings } from './water-surroundings.js';
 
 export function randomSequence(initialSeed) {
   let seed = initialSeed >>> 0;
@@ -14,13 +18,16 @@ export function randomSequence(initialSeed) {
 }
 
 function landscapeMesh(w, h, pointAt, material) {
-  const positions = [], colors = [], landCover = [], indices = [];
+  const positions = [], colors = [], landCover = [], wetness = [], tracks = [], gaussianWeights = [], indices = [];
   for (let j = 0; j <= h; j++) {
     for (let i = 0; i <= w; i++) {
-      const [x, y, z, color, cover] = pointAt(i / w, j / h);
+      const [x, y, z, color, cover, damp, track, gaussianWeight] = pointAt(i / w, j / h);
       positions.push(x, y, z);
       if (color) colors.push(color.r, color.g, color.b);
       if (cover) landCover.push(...cover);
+      if (damp !== undefined) wetness.push(damp);
+      if (track) tracks.push(...track);
+      if (gaussianWeight !== undefined) gaussianWeights.push(gaussianWeight);
       if (i === w || j === h) continue;
       const a = j * (w + 1) + i, b = a + w + 1;
       indices.push(a, b, a + 1, a + 1, b, b + 1);
@@ -30,6 +37,9 @@ function landscapeMesh(w, h, pointAt, material) {
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   if (colors.length) geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   if (landCover.length) geometry.setAttribute('landCover', new THREE.Float32BufferAttribute(landCover, 3));
+  if (wetness.length) geometry.setAttribute('landWetness', new THREE.Float32BufferAttribute(wetness, 1));
+  if (tracks.length) geometry.setAttribute('landTrack', new THREE.Float32BufferAttribute(tracks, 3));
+  if (gaussianWeights.length) geometry.setAttribute('gaussianWeight', new THREE.Float32BufferAttribute(gaussianWeights, 1));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return new THREE.Mesh(geometry, material);
@@ -42,7 +52,7 @@ const extend = (value, lower, upper) => {
   return mix(lower, upper, (value - fringe) / (1 - 2 * fringe));
 };
 
-export function addTerrain(scene, detail) {
+export function addTerrain(scene, detail, naturalLighting = false) {
   const palette = {
     grass: new THREE.Color('#77854e'),
     straw: new THREE.Color('#a1a175'),
@@ -64,24 +74,30 @@ export function addTerrain(scene, detail) {
     const grain = (rng() - .46) * .085 + .031 * Math.sin(x * 11 + z * 7);
     const color = palette.fern.clone().lerp(palette.grass, smooth(.01, .68, broad))
       .lerp(palette.straw, smooth(.51, 1, broad) * .64);
-    const path = laneDistance(x, z);
+    const across = laneDistance(x, z, naturalLighting), path = Math.abs(across);
     const bank = Math.abs(x - riverCenter(z)) - riverWidth(z);
     const shore = smooth(2.65, .53, bank + Math.sin(z * 2.5 + x * .6) * .18);
     const bankColor = palette.gravel.clone().lerp(palette.sand, smooth(-2, 1.5, bank));
     color.lerp(bankColor, shore);
-    const width = x < -13 && z > -5 && z < 5 ? 1.59 : 1.06;
+    const width = sakuraPathHalfWidth(x,z);
     const treadDistance = path + grain * 2.3 + .12 * Math.sin(z * 2.3 - x * 1.8);
     const wear = smooth(width + .27, width - .33, treadDistance) * smooth(.01, .12, y - riverLevel(z));
-    color.lerp(palette.pathShade.clone().lerp(palette.path, .61 + broad * .36), wear);
+    if (!naturalLighting) color.lerp(palette.pathShade.clone().lerp(palette.path, .61 + broad * .36), wear);
     let earth = Math.max(shore * .90, wear);
     let rocky = shore * smooth(.8, -.40, bank);
-    for (const [px, pz, rx, rz] of paddies) {
+    let wetness = naturalLighting ? shore * smooth(.36, .12, y - riverLevel(z)) : undefined;
+    let roadGround = smooth(width+1.05,width+.70,path) * smooth(.06,.21,y-riverLevel(z)) * (1-shore*.94);
+    for (const [px, pz, rx, rz, water] of paddies) {
       if (Math.abs(x - px) > rx + 1 || Math.abs(z - pz) > rz + 1) continue;
       const r = paddyShape(x - px, z - pz, rx, rz);
       const basin = smooth(1.12, .77, r);
       color.lerp(palette.mud, basin);
       earth = Math.max(earth, basin);
       color.lerp(palette.grass, smooth(.9, 1.02, r) * smooth(1.18, 1.06, r) * .5);
+      if (naturalLighting) {
+        wetness = Math.max(wetness, smooth(1.13, .95, r) * smooth(.36, .12, y - water));
+        roadGround *= smooth(1.01,1.14,r);
+      }
     }
     const courtyard = Math.hypot((x + 18) * .86, (z + 46.5) * 1.10);
     const court = smooth(5.5, 4.2, courtyard);
@@ -89,12 +105,19 @@ export function addTerrain(scene, detail) {
     earth = Math.max(earth, court);
     rocky = Math.max(rocky, court * .65);
     color.multiplyScalar(1 + grain);
-    return [x, y, z, color, [earth, rocky, rocky * .23]];
-  }, groundMaterial(detail, { roughness: .96 }));
+    const track = naturalLighting ? [across,width,roadGround*(1-court)] : undefined;
+    const cover = naturalLighting ? (1-earth) ** 1.7 * (1-shore*.90) * (.61+broad*.39) : undefined;
+    return [x, y, z, color, [earth, rocky, rocky * .23], wetness,track,cover];
+  }, groundMaterial(detail, { roughness: .96 }, {
+    wetSoil: naturalLighting, receiveContacts: naturalLighting, trackColor: naturalLighting ? palette.path : undefined
+  }));
   turf.receiveShadow = true;
+  turf.castShadow = naturalLighting;
+  if (naturalLighting) turf.material.shadowSide = THREE.FrontSide;
   turf.name = 'Sculpted river valley and earth terraces';
   turf.userData.gaussianKind = 'turf';
   scene.add(turf);
+  return turf;
 }
 
 export function addMountains(scene, detail) {
@@ -149,14 +172,14 @@ float noise(vec2 p) {
 
 export const sunDirection = new THREE.Vector3(-.54, .70, .46).normalize();
 
-export function addSky(scene) {
+export function addSky(scene, direction = sunDirection, naturalLighting = false) {
   const sky = new THREE.Mesh(new THREE.SphereGeometry(480, 40, 20), new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
     uniforms: {
-      horizon: { value: new THREE.Color('#d8edf6') },
-      zenith: { value: new THREE.Color('#4e9ad8') },
-      sun: { value: sunDirection }
+      horizon: { value: new THREE.Color(naturalLighting ? '#c5dfed' : '#d8edf6') },
+      zenith: { value: new THREE.Color(naturalLighting ? '#488aca' : '#4e9ad8') },
+      sun: { value: direction }
     },
     vertexShader: `
       varying vec3 vRay;
@@ -168,6 +191,7 @@ export function addSky(scene) {
       uniform vec3 horizon, zenith, sun;
       varying vec3 vRay;
       ${noiseGLSL}
+      ${naturalLighting ? cloudLayerGLSL : ''}
       float cloudNoise(vec2 point) {
         return noise(point) * .57 + noise(point * 2.12) * .25 +
           noise(point * 4.28) * .12 + noise(point * 8.49) * .06;
@@ -190,7 +214,9 @@ export function addSky(scene) {
         float crown = smoothstep(-.055,.065,chart.y - .145 +
           (cloudNoise(cloudCoord + vec2(-.1,.18)) - .5) * .17);
         vec3 lit = mix(vec3(.63,.75,.89), vec3(1.,.99,.96), crown);
-        color = mix(color, lit, cloud * .94);
+        color = ${naturalLighting
+          ? 'mix(color, vec3(1.16, 1.14, 1.08), skyCloudCoverage(ray) * .90)'
+          : 'mix(color, lit, cloud * .94)'};
         gl_FragColor = vec4(color, 1.);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -202,10 +228,15 @@ export function addSky(scene) {
   scene.add(sky);
 }
 
-export function addWater(scene) {
+export function addWater(scene, realisticWater = false, sunlightDirection = sunDirection) {
   const clock = { value: 0 };
-  const waterMaterial = new THREE.ShaderMaterial({
+  const surroundings = realisticWater ? createWaterSurroundings(scene, groundAt, -28, -45, 46, 31) : undefined;
+  const waterOptions = { clock, sun: sunlightDirection, sky: '#abd9e9', surroundings };
+  const waterMaterial = realisticWater ? createWaterMaterial({
+    ...waterOptions, kind: 'river', deep: '#1895a0', soil: '#7d785b',
+  }) : new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
+    userData: { waterEnvironment: true },
     uniforms: {
       clock, sun: { value: sunDirection },
       deep: { value: new THREE.Color('#117488') },
@@ -227,6 +258,7 @@ export function addWater(scene) {
       uniform vec4 basinBounds;
       varying vec3 wPos;
       ${noiseGLSL}
+      ${waterEnvironmentGLSL}
       void main() {
         float z = wPos.z, x = wPos.x, t = clock;
         float center = 2.7*sin((z-1.)*.092) + .65*sin((z-1.)*.24)
@@ -247,11 +279,15 @@ export function addWater(scene) {
         body = mix(body, bed, shoal * .56 * (1. - isPaddy));
         vec3 view = normalize(cameraPosition - wPos);
         vec3 norm = normalize(vec3(.026 * wind, 1., .041 * wind + .05 * (vein-.5)));
-        float fresnel = pow(1. - max(dot(view, norm),0.),3.);
-        float reflectedClouds = noise(vec2(x*.16, z*.22) + norm.xz * 22.) * .24;
-        float reflectedBanks = smoothstep(.35,.97,edge) * noise(vec2(z*.37,x*.46) + norm.xz*16.);
-        vec3 reflected = mix(reflection, vec3(.16,.27,.22), reflectedBanks * .82 * (1. - isPaddy));
-        body = mix(body, reflected, min(.73, .08 + fresnel*.57 + reflectedClouds * fresnel));
+        #ifdef USE_WATER_ENVIRONMENT
+          body = reflectWater(body, norm, view, .08 + wide * .075);
+        #else
+          float fresnel = pow(1. - max(dot(view, norm),0.),3.);
+          float reflectedClouds = noise(vec2(x*.16, z*.22) + norm.xz * 22.) * .24;
+          float reflectedBanks = smoothstep(.35,.97,edge) * noise(vec2(z*.37,x*.46) + norm.xz*16.);
+          vec3 reflected = mix(reflection, vec3(.16,.27,.22), reflectedBanks * .82 * (1. - isPaddy));
+          body = mix(body, reflected, min(.73, .08 + fresnel*.57 + reflectedClouds * fresnel));
+        #endif
         float streak = smoothstep(.82,.97,vein + .045 * wind) * smoothstep(.35,.86,wide);
         float foam = smoothstep(.92,1.03,edge) * smoothstep(.60,.80,vein) * (1. - isPaddy);
         float glint = pow(max(0.,dot(reflect(-sun,norm),view)),110.) * (.26 + wide * .58);
@@ -261,12 +297,16 @@ export function addWater(scene) {
           float radius = pow(pow(local.x, 3.5) + pow(local.y, 3.5), 1. / 3.5);
           float shelf = smoothstep(.70,.97,radius + .05 * (sediments - .5));
           vec3 muddyBed = mix(deep, shallow, clamp(.33 * sediments + .59 * shelf, 0., 1.));
-          vec3 reflectedRay = reflect(-view, norm);
-          float skyBand = smoothstep(.02,.32,reflectedRay.y);
-          float reflectedHaze = smoothstep(.30,.78,noise(reflectedRay.xz * 2.2 + wPos.xz * .18));
-          vec3 stillSky = mix(vec3(.10,.16,.115), reflection, skyBand);
-          stillSky = mix(stillSky, vec3(.67,.76,.81), reflectedHaze * skyBand * .33);
-          body = mix(muddyBed, stillSky, (.25 + fresnel * .63) * (1. - shelf * .52));
+          #ifdef USE_WATER_ENVIRONMENT
+            body = reflectWater(muddyBed, norm, view, .055 + shelf * .13);
+          #else
+            vec3 reflectedRay = reflect(-view, norm);
+            float skyBand = smoothstep(.02,.32,reflectedRay.y);
+            float reflectedHaze = smoothstep(.30,.78,noise(reflectedRay.xz * 2.2 + wPos.xz * .18));
+            vec3 stillSky = mix(vec3(.10,.16,.115), reflection, skyBand);
+            stillSky = mix(stillSky, vec3(.67,.76,.81), reflectedHaze * skyBand * .33);
+            body = mix(muddyBed, stillSky, (.25 + fresnel * .63) * (1. - shelf * .52));
+          #endif
           body += vec3(.12,.15,.14) * (streak * .23 + glint);
         }
         gl_FragColor = vec4(body,1.);
@@ -279,34 +319,46 @@ export function addWater(scene) {
     return [riverCenter(z) + (u * 2 - 1) * (riverWidth(z) + .82), riverLevel(z), z];
   }, waterMaterial);
   river.name = 'Turquoise river with downstream surface flow';
+  if (realisticWater) setWaterDepth(river, groundAt);
   scene.add(river);
 
-  const paddyMaterial = waterMaterial.clone();
-  paddyMaterial.uniforms.clock = clock;
-  paddyMaterial.uniforms.isPaddy.value = 1;
-  paddyMaterial.uniforms.deep.value = new THREE.Color('#8e9e68');
-  paddyMaterial.uniforms.shallow.value = new THREE.Color('#b8ba76');
+  const paddyMaterial = realisticWater ? createWaterMaterial({
+    ...waterOptions, kind: 'paddy', deep: '#606f56', soil: '#7f6d4c',
+  }) : waterMaterial.clone();
+  if (!realisticWater) {
+    paddyMaterial.uniforms.clock = clock;
+    paddyMaterial.uniforms.isPaddy.value = 1;
+    paddyMaterial.uniforms.deep.value.set('#8e9e68');
+    paddyMaterial.uniforms.shallow.value.set('#b8ba76');
+  }
   for (const [px, pz, rx, rz, level] of paddies) {
-    const basinMaterial = paddyMaterial.clone();
-    basinMaterial.uniforms.clock = clock;
-    basinMaterial.uniforms.basinBounds.value.set(px, pz, rx, rz);
-    basinMaterial.uniforms.deep.value.set('#71694b');
-    basinMaterial.uniforms.shallow.value.set('#8f835b');
+    const basinMaterial = realisticWater ? paddyMaterial : paddyMaterial.clone();
+    if (!realisticWater) {
+      basinMaterial.uniforms.clock = clock;
+      basinMaterial.uniforms.basinBounds.value.set(px, pz, rx, rz);
+      basinMaterial.uniforms.deep.value.set('#71694b');
+      basinMaterial.uniforms.shallow.value.set('#8f835b');
+    }
     const basin = landscapeMesh(20, 20, (u, v) => {
       const x = (u * 2 - 1), z = (v * 2 - 1);
       const scale = Math.max(Math.abs(x), Math.abs(z)) / Math.max(paddyShape(x, z, 1, 1), .0001);
       return [px + x * scale * rx * .96, level, pz + z * scale * rz * .96];
     }, basinMaterial);
     basin.name = 'Flooded rice terrace';
+    if (realisticWater) setWaterDepth(basin, groundAt);
     scene.add(basin);
   }
 
+  const irrigationMaterial = realisticWater ? createWaterMaterial({
+    ...waterOptions, kind: 'canal', deep: '#6c8c7b', soil: '#827252',
+  }) : paddyMaterial;
   const irrigation = landscapeMesh(8, 51, (u, v) => {
     const x = mix(7.3, 16.1, v);
     const z = -25.2 + 5.7 * v + (u - .5) * .37;
     return [x, groundAt(x, z) + .025, z];
-  }, paddyMaterial);
+  }, irrigationMaterial);
   irrigation.name = 'Uphill paddy feeder channel';
+  if (realisticWater) setWaterDepth(irrigation, groundAt);
   scene.add(irrigation);
   return clock;
 }

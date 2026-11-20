@@ -1,13 +1,21 @@
 import * as THREE from 'three';
 import {
   bounds, crossings, groundAt, houses, laneDistance, mix, paddies, paddyShape,
-  riverCenter, riverLevel, riverWidth, shrine, steps
+  riverCenter, riverLevel, riverWidth, shrine, smooth, steps
 } from './layout.js';
 import { randomSequence } from './landscape.js';
 
-export function plantUnderstory() {
+export function creekPlantHeight(x, z) {
+  const distance = 22.2 - x;
+  if (distance < 1.35 || distance > 22 || z > 1.12) return 1;
+  // Two openings through the foreground paddy line up with bends below the second bridge.
+  const offset = Math.min(Math.abs(z - 1.76 + distance * .60), Math.abs(z - 1.76 + distance * 1.04));
+  return smooth(.36 + distance * .014, .68 + distance * .021, offset);
+}
+
+export function plantUnderstory(naturalLighting = false) {
   const random = randomSequence(84412);
-  const grass = [], sedge = [];
+  const grass = [], sedge = [], reeds = [];
   const grassColors = ['#e4dda9', '#ffffed', '#cbd4a2', '#bfc897', '#d2d1a4'].map(c => new THREE.Color(c));
   const sedgeColors = ['#fff4d7', '#d4d7ab', '#e8e2bb'].map(c => new THREE.Color(c));
   const canRoot = (x, z, y) => y > riverLevel(z) - .06 &&
@@ -44,6 +52,7 @@ export function plantUnderstory() {
   // Sedge occupies damp shelves in alternating dense patches, leaving exposed pebble beaches.
   for (let i = 0; i < 157; i++) {
     const z = mix(-75, 42, random()), bank = random() > .5 ? 1 : -1;
+    if (naturalLighting && z > -23 && z < 24) continue;
     if (Math.sin(z * .77 + bank * 1.95) + Math.sin(z * .21) < -.60) continue;
     const stems = 2 + Math.floor(random() * 5);
     for (let j = 0; j < stems; j++) {
@@ -54,6 +63,37 @@ export function plantUnderstory() {
       const s = mix(.63, 1.33, random());
       sedge.push([x, y - .06, zz, random() * Math.PI * 2, s, s * mix(.85, 1.33, random()), s,
         sedgeColors[Math.floor(random() * sedgeColors.length)]]);
+    }
+  }
+  if (naturalLighting) {
+    const bankRand = randomSequence(71503);
+    const reedTints = ['#e9edc5', '#ecedbd', '#d6ddbb', '#eae4bb'].map(c => new THREE.Color(c));
+    // Taller reed centers break into ankle-height sedge at their margins.
+    for (const [side, center, length, count, height] of [
+      [1, -18.3, 1.8, 21, 1.20], [1, -13.7, 1.2, 13, .83], [1, -7.0, 1.7, 20, 1.12],
+      [1, -2.9, 1.5, 14, .83], [1, 6.5, 1.55, 21, 1.00], [1, 10.1, 1.4, 17, 1.24],
+      [1, 14.7, 2.3, 28, 1.42], [1, 21.1, 1.5, 19, 1.05],
+      [-1, -18.5, 1.8, 20, 1.17], [-1, -12.3, 1.2, 10, .72], [-1, -5.4, 1.4, 21, 1.05],
+      [-1, -2.3, 1.1, 16, .91], [-1, 5.2, 1.35, 18, .85], [-1, 9.6, 2.4, 26, 1.34],
+      [-1, 15.5, 2.1, 17, 1.12], [-1, 22.0, 1.1, 8, .90],
+    ]) {
+      for (let i = 0; i < count; i++) {
+        const along = bankRand() * 2 - 1, z = center + along * length;
+        // The facing bridge approaches have two breaks where the water stays visible.
+        if (side > 0 ? Math.abs(z - 4.6) < 1.24 : Math.abs(z - 3.7) < .84) continue;
+        const outer = Math.abs(along) > .65 || bankRand() < .24;
+        const offset = outer ? mix(-.29, .62, bankRand()) : mix(-.22, .12, bankRand());
+        const x = riverCenter(z) + side * (riverWidth(z) + offset);
+        const y = groundAt(x, z);
+        if (!canRoot(x, z, y) || laneDistance(x, z) < 1.38) continue;
+        const width = mix(.68, 1.12, bankRand());
+        const scale = height * mix(.73, 1.13, bankRand());
+        const yaw = bankRand() * Math.PI * 2;
+        const canopy = creekPlantHeight(x, z);
+        if (canopy < .13) continue;
+        (outer ? sedge : reeds).push([x, y - .038, z, yaw, width,
+          scale * (outer ? .65 : 1) * mix(.49, 1, canopy), width, reedTints[(i + count) % reedTints.length]]);
+      }
     }
   }
   const meadow = [], azalea = [];
@@ -77,8 +117,13 @@ export function plantUnderstory() {
       if (laneDistance(x, z) < 1.16 || !canRoot(x, z, y) ||
           Math.sin(x * 1.6 + z * .79) + Math.cos(z * 2.1 - x * .48) < -.95) continue;
       const size = mix(.54, 1.38, patchRandom());
-      meadow.push([x, y - .035, z, patchRandom() * Math.PI * 2, size, size * mix(.72, 1.22, patchRandom()),
-        size, meadowTints[Math.floor(patchRandom() * meadowTints.length)]]);
+      const yaw = patchRandom() * Math.PI * 2;
+      const height = size * mix(.72, 1.22, patchRandom());
+      const tint = meadowTints[Math.floor(patchRandom() * meadowTints.length)];
+      const canopy = naturalLighting ? creekPlantHeight(x, z) : 1;
+      if (canopy < .10) continue;
+      const fieldEdge = naturalLighting && x > 13 && x < 22.2 && z > -.55 && z < 1.38;
+      meadow.push([x, y - .035, z, yaw, size, height * mix(.39, fieldEdge ? .74 : 1, canopy), size, tint]);
     }
   }
   for (const [cx, cz] of [[16.9, 3.42], [17.65, 3.7], [19.3, 3.78], [18.7, .2], [13.1, -.6], [11.3, 6.5], [11.0, -3.3],
@@ -92,5 +137,5 @@ export function plantUnderstory() {
       azalea.push([x, y - .045, z, angle, mix(.64, 1.37, patchRandom())]);
     }
   }
-  return { grass, sedge, meadow, azalea };
+  return { grass, sedge, reeds, meadow, azalea };
 }

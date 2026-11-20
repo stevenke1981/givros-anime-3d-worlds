@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  ACESFilmicToneMapping, Color, DataUtils, DirectionalLight, HalfFloatType,
-  LinearSRGBColorSpace, NeutralToneMapping, Scene, Vector3,
+  ACESFilmicToneMapping, Color, CubeTexture, DataUtils, DirectionalLight, HalfFloatType,
+  LinearSRGBColorSpace, NeutralToneMapping, PMREMGenerator, Scene, Vector3, WebGLCubeRenderTarget,
 } from 'three';
 import { createLightingPipeline } from '../src/lighting/pipeline.js';
 import { lightingProfiles } from '../src/lighting/profiles.js';
 import { createSkyRadiance } from '../src/lighting/sky.js';
 import { scenes } from '../src/world/catalog.js';
+import { createRegionalLayout } from '../src/world/regions/layout.js';
+import { addHydrology } from '../src/world/regions/terrain.js';
 
 test('each landscape has finite HDR radiance and the festival has a darker zenith than snow country', () => {
   assert.deepEqual(Object.keys(lightingProfiles).sort(), scenes.map(scene => scene.id).sort());
@@ -57,4 +59,52 @@ test('without an HDR render target, ACES direct rendering restores legacy exposu
   assert.equal(renderer.toneMapping, NeutralToneMapping);
   assert.equal(renderer.toneMappingExposure, 1);
   pipeline.dispose();
+});
+
+test('physical water uses the HDR sky cubemap only while the lighting pipeline owns it', (t) => {
+  const renderer = {
+    toneMapping: NeutralToneMapping,
+    toneMappingExposure: 1,
+    extensions: { has: () => true },
+    getSize: target => target.set(390, 844),
+  };
+  const pipeline = createLightingPipeline(renderer, { coarse: true });
+  t.after(pipeline.dispose);
+  const radiance = new WebGLCubeRenderTarget(16);
+  radiance.texture.mipmaps = [16, 8, 4].map(size => ({ width: size, height: size }));
+  t.mock.method(PMREMGenerator.prototype, 'fromEquirectangular', () => radiance);
+  let disposals = 0;
+  radiance.addEventListener('dispose', () => disposals++);
+
+  const terrace = new Scene();
+  const originalEnvironment = new CubeTexture();
+  terrace.environment = originalEnvironment;
+  terrace.environmentIntensity = .42;
+  const sunlight = new DirectionalLight();
+  addHydrology(terrace, createRegionalLayout('04'), sunlight.position.clone().normalize(), true);
+  const waterMaterials = terrace.children.map(mesh => ({
+    material: mesh.material,
+    defines: { ...mesh.material.defines },
+    uniformNames: Object.keys(mesh.material.uniforms),
+  }));
+  assert.ok(waterMaterials.some(({ defines }) => defines.FLOODED_SOIL));
+  terrace.add(sunlight);
+
+  assert.equal(pipeline.apply(terrace, '04', true), 'hdr-post');
+  assert.equal(terrace.environment, radiance.texture);
+  for (const { material, defines } of waterMaterials) {
+    assert.deepEqual(material.defines, { ...defines, USE_WATER_ENVIRONMENT: 1 });
+    assert.equal(material.uniforms.waterEnvironment.value, radiance.texture);
+    assert.equal(material.uniforms.waterEnvironmentMaxLod.value, 2);
+    assert.equal(material.uniforms.waterEnvironmentIntensity.value, terrace.environmentIntensity);
+  }
+
+  pipeline.release(terrace);
+  assert.equal(terrace.environment, originalEnvironment);
+  assert.equal(terrace.environmentIntensity, .42);
+  assert.equal(disposals, 1);
+  for (const { material, defines, uniformNames } of waterMaterials) {
+    assert.deepEqual(material.defines, defines);
+    assert.deepEqual(Object.keys(material.uniforms), uniformNames);
+  }
 });

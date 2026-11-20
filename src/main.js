@@ -3,6 +3,7 @@ import {
 } from 'three';
 import { createGaussianDetail } from './detail/gaussian-detail.js';
 import { createLightingPipeline, hasLightingProfile } from './lighting/pipeline.js';
+import { supportsNaturalLighting } from './lighting/daylight.js';
 import { scenes } from './world/catalog.js';
 import { disposeScene } from './world/dispose-scene.js';
 import { advanceWalker, EYE_HEIGHT } from './walk.js';
@@ -52,6 +53,7 @@ let updateDetail;
 let mode = 'scenic';
 let previousTime;
 let elapsed = 0;
+let previousReducedMotion;
 let needsDraw = true;
 let canvasWidth = 0;
 let canvasHeight = 0;
@@ -157,12 +159,15 @@ function drawFrame(time) {
   previousTime = time;
   if (!world || explorer.dataset.state !== 'ready') return;
   if (mode === 'walk' && !help.open && !sceneDialog.open && moveCamera(delta)) needsDraw = true;
-  if (!reducedMotion.matches) {
+  const pauseMotion = reducedMotion.matches;
+  if (pauseMotion !== previousReducedMotion) needsDraw = true;
+  previousReducedMotion = pauseMotion;
+  if (!pauseMotion) {
     elapsed += delta;
     needsDraw = true;
   }
   if (!needsDraw) return;
-  world.update(elapsed, delta, reducedMotion.matches);
+  world.update(elapsed, delta, pauseMotion);
   updateDetail?.(camera);
   lighting.render(world.scene, camera);
   needsDraw = false;
@@ -254,7 +259,10 @@ async function loadRequestedScenes() {
         if (reportProgress && !requestedScene && !failed && message) notice.textContent = descriptor.name + ' · ' + message;
       };
       const useBakedMaterials = !legacyLighting && hasLightingProfile(descriptor.id);
-      const worldOptions = { renderer, onProgress: progress, useBakedMaterials };
+      const physicalSurfaces = useBakedMaterials && options.get('surface') !== 'legacy';
+      const naturalLighting = physicalSurfaces && supportsNaturalLighting(descriptor.id) &&
+        options.get('daylight') !== 'baseline';
+      const worldOptions = { renderer, onProgress: progress, useBakedMaterials, physicalSurfaces, naturalLighting, coarse };
       next = descriptor.id === '01'
         ? await module.createSakuraWorld(worldOptions)
         : await module.createRegionalWorld(descriptor.id, worldOptions);
@@ -270,7 +278,7 @@ async function loadRequestedScenes() {
           }
         });
       }
-      const lightingMode = lighting.apply(next.scene, descriptor.id);
+      const lightingMode = lighting.apply(next.scene, descriptor.id, physicalSurfaces, naturalLighting);
       const detail = options.get('splats') === 'off' ? undefined : createGaussianDetail(next.scene, {
         detailScale: coarse ? 0.56 : 1,
         report: traceSplats ? (counts) => { canvas.dataset.gaussianCounts = JSON.stringify(counts); } : undefined,
@@ -292,6 +300,8 @@ async function loadRequestedScenes() {
       elapsed = 0;
       explorer.dataset.scene = descriptor.id;
       explorer.dataset.lighting = lightingMode;
+      explorer.dataset.surface = physicalSurfaces ? 'physical' : 'legacy';
+      explorer.dataset.daylight = naturalLighting ? 'natural' : 'baseline';
       explorer.dataset.state = 'ready';
       canvas.setAttribute('aria-label', descriptor.name + '即時 3D 場景');
       document.title = descriptor.name + '｜十景漫步';
@@ -342,7 +352,6 @@ window.addEventListener('keydown', (event) => {
 });
 window.addEventListener('keyup', (event) => pressedKeys.delete(event.code));
 window.addEventListener('blur', clearInput);
-reducedMotion.addEventListener('change', () => { needsDraw = true; });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearInput();
 });
@@ -397,9 +406,9 @@ function boot() {
     if (event.persisted) return;
     failed = true;
     renderer.setAnimationLoop(null);
-    if (world) disposeWorld(world);
-    lighting.dispose();
-    renderer.dispose();
+    // The document is leaving permanently. Drop its whole GPU context in one
+    // operation; scene switches still dispose individual resources in disposeWorld.
+    renderer.forceContextLoss();
   });
   canvas.addEventListener('webglcontextlost', () => {
     showFailure('3D 繪圖已中斷，請重新載入頁面。');

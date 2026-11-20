@@ -75,9 +75,11 @@ def wild_azalea():
     return [wood, greens, flowers]
 
 
-def broadleaf():
+def broadleaf(transfer_normals=False):
     wood = Mesh("Broadleaf flared roots and curved limbs", smooth=True)
-    leaves = Mesh("Layered broadleaf foliage sprays", LEAVES)
+    leaves = Mesh("Layered broadleaf foliage sprays", LEAVES, smooth=transfer_normals)
+    if transfer_normals:
+        leaves.name += " with canopy normals"
     bark = palette("443e32 555044 635d4e 736956 837862")
     green = palette("415534 52683f 64804b 7c9058 98a769")
     trunk = [Vector(p) for p in [(0, 0, 0), (0.04, 0.02, 0.31), (0.19, -0.04, 1.58),
@@ -108,6 +110,8 @@ def broadleaf():
                 tint = RNG.randrange(len(green) - 1)
                 leaf(leaves, center, Vector((cos(azimuth), sin(azimuth), RNG.uniform(-0.53, 0.52))),
                      RNG.uniform(0.14, 0.36), RNG.uniform(0.037, 0.095), green[tint:tint + 2])
+            if transfer_normals:
+                leaves.transfer_canopy_normals(bud.lerp(tip, 0.85), (0.64, 0.64, 0.43))
     return [wood, leaves]
 
 

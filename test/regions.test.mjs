@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { groundAt as sakuraGroundAt, paddies as sakuraPaddies } from '../src/world/layout.js';
 import { createRegionalLayout } from '../src/world/regions/layout.js';
 import { regionalPlantings, regionalPlantModels } from '../src/world/regions/planting.js';
 
@@ -106,4 +107,45 @@ test('Warped lake contours match the physical waterline, dock and outlet', () =>
   }
   assert.ok(Math.max(...scales)-Math.min(...scales)>.18);
   assert.ok(world.baseWaterAt(world.crossings[0].z)<world.spec.lake.level);
+});
+
+test('Scene 04 has a recessed downhill ditch beside the existing walking route', () => {
+  const legacy = createRegionalLayout('04');
+  const terrace = createRegionalLayout('04', { naturalLighting: true });
+  const { canal } = terrace;
+  assert.equal(legacy.canal, undefined);
+  let previousWater = -Infinity;
+  for (let x = canal.start + 1.2; x < canal.end - 1.2; x += .13) {
+    const z = canal.centerAt(x), water = canal.waterAt(x), halfWidth = canal.widthAt(x);
+    assert.ok(water > previousWater);
+    assert.equal(terrace.waterAt(x,z), water);
+    assert.ok(water - terrace.groundAt(x,z) > .20);
+    assert.ok(terrace.groundAt(x,z - halfWidth - .17) > water + .035);
+    assert.ok(terrace.groundAt(x,z + halfWidth + .17) > water + .035);
+    assert.ok(!terrace.canWalk(x,z));
+    previousWater = water;
+  }
+  const path = terrace.routes[1];
+  for (let i = 1; i < path.length; i++) {
+    const [ax,az] = path[i-1], [bx,bz] = path[i];
+    const count = Math.ceil(Math.hypot(bx-ax,bz-az)/.09);
+    for (let j = 0; j <= count; j++) {
+      const x = ax + (bx-ax)*j/count, z = az + (bz-az)*j/count;
+      assert.ok(terrace.canWalk(x,z));
+      assert.equal(terrace.surfaceAt(x,z), legacy.surfaceAt(x,z));
+    }
+  }
+});
+
+test('Pilot paddies retain shallow planting beds inside the road grading', () => {
+  const terrace = createRegionalLayout('04', { naturalLighting: true });
+  for (const { groundAt, paddies } of [terrace, { groundAt: sakuraGroundAt, paddies: sakuraPaddies }]) {
+    for (const [x,z,,,water] of paddies) {
+      const depth = water - groundAt(x,z);
+      assert.ok(depth >= .10 && depth <= .14, `Paddy center (${x}, ${z}) depth ${depth}`);
+    }
+  }
+  for (const [x,z] of [[16.01,-12.24], [17.02,-12.45], [15.08,-12.10], [17.87,-12.43]]) {
+    assert.ok(5.60 - terrace.groundAt(x,z) > .09, `Walkway fill intrudes into paddy at (${x}, ${z})`);
+  }
 });

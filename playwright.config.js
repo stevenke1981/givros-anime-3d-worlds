@@ -5,6 +5,28 @@ export default defineConfig({
   testMatch: '**/*.spec.js',
   workers: 1,
   timeout: 90_000,
+  projects: [
+    { name: 'desktop', testIgnore: ['**/explorer.spec.js', '**/touch.spec.js'] },
+    {
+      name: 'rendering',
+      testMatch: '**/explorer.spec.js',
+      // This route loads the world, captures three views and checks two wind modes
+      // on a software GPU. Keep the individual movement and readiness deadlines.
+      timeout: 180_000,
+      use: { viewport: { width: 1100, height: 720 } },
+    },
+    {
+      name: 'touch',
+      testMatch: '**/touch.spec.js',
+      // The two scene loads can take 115 seconds on software WebGL.
+      timeout: 150_000,
+      use: {
+        hasTouch: true,
+        isMobile: true,
+        viewport: { width: 390, height: 844 },
+      },
+    },
+  ],
   use: {
     baseURL: 'http://127.0.0.1:4182/sakura/',
     viewport: { width: 1440, height: 900 },

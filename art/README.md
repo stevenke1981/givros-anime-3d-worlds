@@ -1,5 +1,7 @@
 # Sakura Mountain Village asset library
 
+The distant stands in the creek and terrace scenes use two orthographic Cycles views of the regional cedar. Rebuild the transparent atlas with `blender -b -P art/bake_hillside_cedar.py`. Nearby trees use the original walk-around meshes.
+
 Open [sakura-library.blend](sakura-library.blend) in Blender 5.2.1 and choose an asset from the scene picker. Each scene contains one asset at real scale, organized into editable mesh assemblies. Use solid viewport shading with the **Vertex** color option or switch to **Material Preview**.
 
 The runtime loads the matching file from [public/models](../public/models). Positions are in meters. Placement anchors are at the ground origin with **Y up in GLB** and **Z up in Blender**. Buildings and the torii face **+Z in GLB** and **−Y in Blender**. Vertex paint travels as COLOR_0. Selected materials multiply it by a seamless 128 × 128 weathering map and use a matching relief normal map. Maps are packed into the .blend and embedded in each applicable GLB. Thin blades, flowers and folded paper are double-sided.
@@ -33,12 +35,17 @@ The editable [valley-library.blend](valley-library.blend) adds three original as
 - `cherry_blossom` folds five cleft petals around a central cup. The Sakura builder batches blooms, branchlets and young leaves into three editable assemblies. `cedar_bough` and `cedar_spray` compose three-dimensional hanging plumes and toothed tip foliage around staggered branch nodes.
 - `detail_material` authors repeatable stone, wood and fired-clay weathering and relief. `Mesh.object` projects them onto the appropriate faces and aligns grain to the long axis of timber faces.
 
+## Creek and terrace plant variants
+
+[pilot-botany.blend](pilot-botany.blend) holds the editable variants used in the natural-lighting versions of scenes 01 and 04. `rice-arching` has seven tillers with folded, outward-curving blades anchored at the paddy bed. `duckweed` has small cupped fronds at the waterline. `sakura-canopy` and `valley-broadleaf-canopy` transfer ellipsoidal normals from the individual branch clusters to the petals and leaves. [build_pilot_botany.py](build_pilot_botany.py) generates the library and exports these four independent GLBs using the original project plant geometry and paint.
+
 ## Rebuild and check
 
 From the repository root, use PowerShell and adjust the Blender path for your installation.
 
     & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/build_sakura.py
     & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/build_valley.py
+    & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/build_pilot_botany.py
     python art/verify_sakura.py
     & 'C:/Program Files/Blender Foundation/Blender 5.2/blender.exe' --background --factory-startup --python-exit-code 1 --python art/preview_sakura.py
 

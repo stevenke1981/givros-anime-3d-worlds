@@ -155,6 +155,14 @@ class Mesh:
         self.vertices = []
         self.faces = []
         self.colors = []
+        self.canopy_normals = []
+
+    def transfer_canopy_normals(self, center, scale):
+        """Shade a group of leaves as the surface of its branch's ellipsoidal crown."""
+        for vertex in self.vertices[len(self.canopy_normals):]:
+            offset = Vector(vertex) - center
+            normal = Vector(tuple(value / radius ** 2 for value, radius in zip(offset, scale)))
+            self.canopy_normals.append(normal.normalized())
 
     def add(self, vertices, faces, paint):
         offset = len(self.vertices)
@@ -259,6 +267,8 @@ class Mesh:
         editable.free()
         if self.smooth:
             mesh.polygons.foreach_set("use_smooth", [True] * len(mesh.polygons))
+        if self.canopy_normals:
+            mesh.normals_split_custom_set_from_vertices(self.canopy_normals)
         mesh.update()
         surface = self.finish.get("surface_pattern")
         if surface:
@@ -630,10 +640,13 @@ def cherry_blossom(mesh, center, direction, radius, phase, paint):
     mesh.add(vertices, faces, paint)
 
 
-def sakura():
+def sakura(transfer_normals=False):
     wood = Mesh("Forked cherry trunk, exposed roots and swept branchlets", TIMBER, smooth=True)
     buds = Mesh("Five-lobed cupped sakura flowers", FOLIAGE, smooth=True)
     leaves = Mesh("Young serrate cherry leaves", LEAVES, smooth=True)
+    if transfer_normals:
+        for canopy in (buds, leaves):
+            canopy.name += " with canopy normals"
     trunk = [(0, 0, 0), (0.01, -0.07, 0.44), (-0.12, -0.02, 1.25),
              (-0.33, 0.14, 2.26), (-0.17, 0.25, 3.02), (0.12, 0.33, 3.78),
              (0.28, 0.55, 4.64), (0.69, 0.59, 5.19)]
@@ -683,6 +696,10 @@ def sakura():
                 for offset in (0.38, 0.81):
                     blade(leaves, node.lerp(end_point, offset), (cos(angle), sin(angle)),
                           RNG.uniform(-0.05, 0.11), RNG.uniform(0.16, 0.25), 0.030, spring[1:])
+            if transfer_normals:
+                center = elbow_point.lerp(tip, 0.52)
+                for canopy in (buds, leaves):
+                    canopy.transfer_canopy_normals(center, (0.60, 0.60, 0.49))
     return [wood, buds, leaves]
 
 
