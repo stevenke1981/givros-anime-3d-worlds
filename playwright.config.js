@@ -5,6 +5,20 @@ export default defineConfig({
   testMatch: '**/*.spec.js',
   workers: 1,
   timeout: 90_000,
+  projects: [
+    { name: 'desktop', testIgnore: '**/touch.spec.js' },
+    {
+      name: 'touch',
+      testMatch: '**/touch.spec.js',
+      // The two scene loads can take 115 seconds on software WebGL.
+      timeout: 150_000,
+      use: {
+        hasTouch: true,
+        isMobile: true,
+        viewport: { width: 390, height: 844 },
+      },
+    },
+  ],
   use: {
     baseURL: 'http://127.0.0.1:4182/sakura/',
     viewport: { width: 1440, height: 900 },
