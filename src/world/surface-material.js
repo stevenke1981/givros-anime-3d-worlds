@@ -45,7 +45,7 @@ export function surfaceProfile(asset, part, material) {
   return 'coated';
 }
 
-export function applyAssetSurfaces(scene, detail) {
+export function applyAssetSurfaces(scene, detail, terrace = false) {
   const variants = new Map();
   const daylight = Boolean(detail.userData.contactOcclusion);
   scene.traverse(mesh => {
@@ -56,8 +56,11 @@ export function applyAssetSurfaces(scene, detail) {
       const finish = surfaceProfile(asset, mesh.name, source.name);
       const leafLight = daylight && finish === 'foliage';
       const wallWeathering = daylight && finish === 'plaster';
-      const bankStone = daylight && asset === 'canal-stone';
+      const mossPiece = daylight && asset === 'canal-moss';
+      const bankStone = daylight && (asset === 'canal-stone' || mossPiece);
       const facade = daylight && (asset === 'house' || asset === 'shrine');
+      const farmhouse = daylight && terrace && asset === 'house';
+      const foundation = farmhouse && /foundations/i.test(mesh.name);
       const weatheredWood = facade && finish === 'wood';
       const heightDetail = leafLight || wallWeathering || bankStone;
       const finishRoughness = !daylight ? undefined :
@@ -111,9 +114,15 @@ float stoneHeight = smoothstep(assetHeightRange.x, assetHeightRange.y, vMaterial
 float mossMottle = texture2D(assetDetail, vMaterialPosition.xz * .73 + vMaterialPosition.y * vec2(.53, .26)).g;
 float mossCover = smoothstep(.33, .68, mossMottle * .71 + surfaceGrain.g * .33) *
   smoothstep(.18, .69, stoneHeight);
-vec3 bankStoneColor = vec3(.32, .25, .17) * (.67 + surfaceGrain.g * .73);
+vec3 bankStoneColor = vec3(.23, .193, .151) * (.67 + surfaceGrain.g * .73);
 diffuseColor.rgb = mix(diffuseColor.rgb * vec3(1.14, 1.06, .92), bankStoneColor, .53);
-diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.22, .25, .095), mossCover * .84);
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.136, .185, .066),
+  ${mossPiece ? '.39 + mossCover * .56' : 'mossCover * .84'});
+` : ''}
+${foundation ? `
+float foundationFoot = 1. - smoothstep(.025, .225 + .075 * surfaceGrain.b, vMaterialPosition.y);
+float wetJoint = smoothstep(.27, .60, surfaceGrain.g);
+diffuseColor.rgb *= mix(vec3(1.075, 1.055, .998), vec3(.66, .71, .47), foundationFoot * wetJoint * .55);
 ` : ''}
 ${weatheredWood ? `
 float silvering = smoothstep(.28, .68, surfaceGrain.g);
@@ -127,7 +136,8 @@ diffuseColor.rgb *= mix(vec3(.61, .68, .60), vec3(1.11, 1.08, .96), leafHeight);
 ${wallWeathering ? `
 vec2 wallUV = vec2(dot(vMaterialPosition.xz, vec2(1.,1.)), vMaterialPosition.y);
 float runoff = texture2D(assetDetail, wallUV * vec2(.34,.11)).b;
-float splash = 1. - smoothstep(.035, .20 + .32 * runoff, vMaterialPosition.y - assetHeightRange.x);
+float splash = 1. - smoothstep(.035, ${farmhouse ? '.18 + .17 * runoff' : '.20 + .32 * runoff'},
+  vMaterialPosition.y - assetHeightRange.x);
 float fleck = smoothstep(.24, .65, surfaceGrain.b);
 diffuseColor.rgb *= mix(vec3(1.), mix(vec3(.51,.48,.35), vec3(.49,.55,.37), fleck),
   splash * (.31 + .62 * fleck));
@@ -151,14 +161,21 @@ float sidePaper = step(halfWidth*1.043, panel.x) * (1. - step(.415, abs(vMateria
   * (1. - step(.272, abs(vMaterialPosition.y-paperLevel-.02)));
 float shoji = max(sidePaper, facePaper);
 ` : ''}
-float eaveCrease = 1. - smoothstep(.04, .52 + runoff * .22, max(0., eaveHeight - vMaterialPosition.y));
-diffuseColor.rgb *= 1. - eaveCrease * (.21 + .10 * runoff);
+float underEave = eaveHeight - vMaterialPosition.y;
+float eaveCrease = 1. - smoothstep(.04, .52 + runoff * .22, max(0., underEave));
+${farmhouse ? `
+eaveCrease *= smoothstep(-.23, .06, underEave) * (1. - shoji);
+diffuseColor.rgb *= mix(vec3(1.), vec3(.61, .68, .74), eaveCrease);
+diffuseColor.rgb *= mix(vec3(1.), vec3(.78,.84,.87), shoji * .84);
+` : 'diffuseColor.rgb *= 1. - eaveCrease * (.21 + .10 * runoff);'}
 ` : ''}`)
           .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
 roughnessFactor = clamp(roughnessFactor + (surfaceGrain.g - .43) * assetDetailScale.z * surfaceFade * 2.0, .18, 1.0);
 ${finishRoughness === undefined ? '' :
   'roughnessFactor = clamp(assetFinishRoughness + (roughnessFactor - .60) * .25, .25, .98);'}
-${facade && wallWeathering ? 'roughnessFactor = mix(roughnessFactor, .39 + surfaceGrain.g * .14, shoji);' : ''}`)
+${facade && wallWeathering
+  ? `roughnessFactor = mix(roughnessFactor, ${farmhouse ? '.23 + surfaceGrain.g * .12' : '.39 + surfaceGrain.g * .14'}, shoji);`
+  : ''}`)
           .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
 ${finish === 'hardware' ? 'metalnessFactor = mix(.62, .9, smoothstep(.26, .64, surfaceGrain.r));' : ''}`)
           .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
@@ -169,6 +186,10 @@ normal = applySurfaceRelief(-vViewPosition, normal,
   float microCavity = 1.0 - smoothstep(.24, .40, surfaceGrain.a);
   reflectedLight.indirectDiffuse *= 1.0 - microCavity * surfaceFade * .095;
 #endif
+${farmhouse && wallWeathering ? `
+// Subtle sky highlights on glazing behind the modelled timber lattice.
+reflectedLight.indirectSpecular *= mix(1., 1.32, shoji);
+` : ''}
 ${bankStone ? `
 vec3 stoneBounce = diffuseColor.rgb * vec3(.70, .62, .51);
 vec3 stoneDiffuse = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;
@@ -190,7 +211,8 @@ reflectedLight.indirectDiffuse += max(stoneBounce - stoneDiffuse, vec3(0.0));
         }
         if (daylight) applyHeightFog(shader);
       };
-      material.customProgramCacheKey = () => `valley-surface-${finish}-${daylight}-${finishRoughness}-${facade || bankStone ? asset : ''}`;
+      material.customProgramCacheKey = () =>
+        `valley-surface-${finish}-${daylight}-${finishRoughness}-${facade || bankStone ? asset : ''}-${foundation || farmhouse && wallWeathering}`;
       return material;
     };
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(enhance) : enhance(mesh.material);

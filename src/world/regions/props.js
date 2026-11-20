@@ -124,26 +124,32 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     const bankRand=randomSequence(seed+3631);
     const stoneTints=['#f3e7db','#e9e2d7','#e8ead7','#dfecd6'].map(hex=>new THREE.Color(hex));
     const grassTint=new THREE.Color('#bec58f');
+    const mossTint=new THREE.Color('#b9c89a');
     for (const side of [-1,1]) {
-      for (let px=canal.start+1.24;px<canal.end-1.24;px+=mix(.24,.51,bankRand())) {
-        if (Math.abs(px-x)<.85) continue;
+      for (let px=canal.start+1.24;px<canal.end-1.24;px+=mix(.27,.54,bankRand())) {
+        if (Math.abs(px-x)<.73) continue;
         const worn=Math.sin(px*.72+side*1.46)+.48*Math.sin(px*1.51+.40);
         const cz=canal.centerAt(px), width=canal.widthAt(px);
         const yaw=Math.atan2(canal.centerAt(px-.21)-canal.centerAt(px+.21),.42);
-        if (worn>.30 && bankRand()>.27) {
-          const pz=cz+side*(width+mix(.10,.33,bankRand()));
-          const size=mix(.115,.245,bankRand());
+        if (bankRand() < (worn>.14 ? .76 : .27)) {
+          const pz=cz+side*(width+mix(.055,.27,bankRand()));
+          const size=mix(.066,.25,bankRand()**1.55);
           const tint=stoneTints[Math.floor(bankRand()*stoneTints.length)];
-          put('canal-stone',px,groundAt(px,pz)-size*.26,pz,yaw+(bankRand()-.5)*1.36,
-            size,size*mix(.64,.94,bankRand()),size*mix(.82,1.14,bankRand()),tint);
+          put('canal-stone',px,groundAt(px,pz)-size*.17,pz,yaw+bankRand()*Math.PI,
+            size,size*mix(.49,.87,bankRand()),size*mix(.66,1.29,bankRand()),tint);
+          if (bankRand()<.58) {
+            const mx=px+mix(-.16,.16,bankRand()), mz=pz+side*mix(.05,.19,bankRand());
+            const moss=mix(.045,.105,bankRand());
+            put('canal-moss',mx,groundAt(mx,mz)-.011,mz,bankRand()*6.28,
+              moss,moss*.44,moss*1.22,mossTint);
+          }
         }
-        const shaded=side===1;
-        if (worn<(shaded?.81:.54) && bankRand()<(shaded?.84:.44)) {
-          const pz=cz+side*(width+mix(.24,shaded?.46:.39,bankRand()));
-          const y=groundAt(px,pz), scale=mix(.67,shaded?1.28:1.02,bankRand());
+        if (bankRand() < (worn<.32 ? .82 : .33)) {
+          const pz=cz+side*(width+mix(.14,.43,bankRand()));
+          const y=groundAt(px,pz), scale=mix(.49,1.06,bankRand());
           if (routeBlend(px,pz)[0]<.79 || y<canal.waterAt(px)+.09 || blocks(px,pz)) continue;
-          put('grass',px,y-.024,pz,yaw+(shaded?Math.PI:0)+(bankRand()-.5)*1.23,
-            scale,scale,scale,grassTint,mix(.54,.99,bankRand()));
+          put('grass',px,y-.021,pz,yaw+(side>0?Math.PI:0)+(bankRand()-.5)*.91,
+            scale,scale*.82,scale,grassTint,mix(.66,1.02,bankRand()));
         }
       }
     }
@@ -300,8 +306,9 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
         if (cropRand()<(pocket>.72?.43:.052) || paddyShape(px-x,pz-z,rx,rz)>=.89) continue;
         const root=groundAt(px,pz)-.008;
         if (root>y-.025) continue;
-        const scale=mix(.85,1.15,size);
-        put('rice',px,root,pz,yaw,scale,scale*mix(.87,1.26,shade),scale,riceTint(px,pz,shade));
+        const scale=mix(.85,1.18,size);
+        put('rice',px,root,pz,yaw,scale,scale*mix(.93,1.11,shade),scale,riceTint(px,pz,shade),
+          (cropRand()-.5)*.19);
       } else {
         const s=mix(.80,1.11,size);
         put('rice',x+a,y-.14,z+b,yaw,s,s,s,tints[Math.floor(shade*tints.length)]);
@@ -320,16 +327,39 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
     const s=mix(.72,1.27,rand());
     put('grass',x,y-.032,z,rand()*6.28,s,s*mix(.85,1.23,rand()),s,tints[i%6]);
   }
-  if (canal) for (const placement of groundEdgePlants({
-    routes:layout.routes,paddies,groundAt,laneDistance:(x,z)=>routeBlend(x,z)[0],
-    halfWidth:()=>terracePathHalfWidth,seed:seed+12713,
-    canPlace:(x,z,y)=>layout.canWalk(x,z) && !blocks(x,z) && y>waterAt(x,z)+.10 && Math.abs(layout.surfaceAt(x,z)-y)<.10
-  })) put('grass',...placement);
-
   if (canal) {
+    const edges=randomSequence(seed+25729);
+    const edgeStones=['#efe2c6','#d0cbb3','#c2bead'].map(hex=>new THREE.Color(hex));
+    const edgePlants=groundEdgePlants({
+      routes:layout.routes,paddies,groundAt,laneDistance:(x,z)=>routeBlend(x,z)[0],
+      halfWidth:()=>terracePathHalfWidth,seed:seed+12713,
+      canPlace:(x,z,y)=>layout.canWalk(x,z) && !blocks(x,z) && y>waterAt(x,z)+.10 && Math.abs(layout.surfaceAt(x,z)-y)<.10
+    });
+    for (const placement of edgePlants) {
+      put('grass',...placement);
+      if (edges()>.16) continue;
+      const [x,y,z,yaw]=placement;
+      const size=mix(.022,.063,edges());
+      put('canal-stone',x,y+.014,z,yaw,size,size*.61,size*.83,edgeStones[Math.floor(edges()*edgeStones.length)]);
+    }
+    const garden=randomSequence(seed+6317);
+    for (const { model, x, z, r, size } of buildings) {
+      if (model!=='house') continue;
+      const side=garden()<.5?-1:1;
+      for (let i=0;i<6;i++) {
+        const a=(side*mix(2.9,4.3,garden()))*size;
+        const b=(i<4?mix(3.17,3.8,garden()):-mix(3.15,3.65,garden()))*size;
+        const px=x+a*Math.cos(r)+b*Math.sin(r), pz=z-a*Math.sin(r)+b*Math.cos(r);
+        if (routeBlend(px,pz)[0]<1.38 || !layout.canWalk(px,pz) || !rndClear(px,pz) ||
+            Math.abs(groundAt(px,pz)-waterAt(px,pz))<.18) continue;
+        const scale=mix(.35,.67,garden());
+        prop('shrub',px,pz,garden()*Math.PI*2,scale,-.045,tints[i%6]);
+      }
+    }
     registerRiceWaterPlants(scene,groups.get('rice') ?? [],assets.rice);
     const bankPlants=(groups.get('river-sedge') ?? []).map(([x,y,z,,,scale])=>[x,y,z,scale*.56]);
     registerWaterPlants(scene,bankPlants,'sedge');
+    registerWaterPlants(scene,(groups.get('shrub') ?? []).map(([x,y,z,,,scale])=>[x,y,z,scale*.67]),'shrub');
     for (const plant of plantDuckweed(paddies,groundAt,seed+1994)) put('duckweed',...plant);
   }
 
@@ -349,7 +379,9 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
       }
       for (const chunk of chunks.values()) {
         if (!Object.hasOwn(plantingLOD, name)) {
-          addInstances(scene,assets[name],chunk,cast,kind);
+          const nearCedar = canal && name==='cedar-lod' &&
+            chunk.some(([x,,z])=>Math.abs(x)<58 && z>-61 && z<42);
+          addInstances(scene,assets[name],chunk,cast || nearCedar,kind);
           continue;
         }
         const [x,,z]=chunk[Math.floor(chunk.length/2)];
@@ -363,7 +395,9 @@ export function populateRegionalWorld(scene, layout, assets, seed) {
         }
         scene.add(level);
       }
-    } else if (name==='canal-stone') addInstances(scene,assets.rock,positions,cast,kind,name);
+    } else if (name==='canal-stone' || name==='canal-moss') {
+      addInstances(scene,assets.rock,positions,cast && name==='canal-stone',kind,name);
+    }
     else addInstances(scene,assets[name],positions,cast,kind);
   }
   return blocks;
