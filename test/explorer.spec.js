@@ -1,10 +1,5 @@
 import { expect, test } from '@playwright/test';
 
-test.afterEach(async ({ page }) => {
-  // Let the explorer's pagehide handler dispose of its WebGL resources before teardown.
-  if (!page.isClosed()) await page.goto('about:blank');
-});
-
 test('the release loads its models, changes viewpoints, and responds to keyboard movement', async ({ page }, info) => {
   const errors = [];
   const modelResponses = [];

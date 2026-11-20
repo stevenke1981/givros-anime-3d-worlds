@@ -7,7 +7,14 @@ export default defineConfig({
   timeout: 90_000,
   projects: [
     { name: 'desktop', testIgnore: ['**/explorer.spec.js', '**/touch.spec.js'] },
-    { name: 'rendering', testMatch: '**/explorer.spec.js' },
+    {
+      name: 'rendering',
+      testMatch: '**/explorer.spec.js',
+      // This route loads the world, captures three views and checks two wind modes
+      // on a software GPU. Keep the individual movement and readiness deadlines.
+      timeout: 180_000,
+      use: { viewport: { width: 1100, height: 720 } },
+    },
     {
       name: 'touch',
       testMatch: '**/touch.spec.js',

@@ -406,9 +406,8 @@ function boot() {
     if (event.persisted) return;
     failed = true;
     renderer.setAnimationLoop(null);
-    if (world) disposeWorld(world);
-    lighting.dispose();
-    renderer.dispose();
+    // The document is leaving permanently. Drop its whole GPU context in one
+    // operation; scene switches still dispose individual resources in disposeWorld.
     renderer.forceContextLoss();
   });
   canvas.addEventListener('webglcontextlost', () => {
