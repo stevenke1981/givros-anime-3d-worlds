@@ -28,7 +28,8 @@ export function createLightingPipeline(renderer, { legacy = false, coarse = fals
     const originalProfile = lightingProfiles[id];
     const profile = naturalLighting ? {
       ...originalProfile, exposure: 1.04, environment: .29, hemisphere: .74, direct: 1,
-      sunRadiance: 22, glow: .036, contrast: .112,
+      sky: ['#488aca', '#c5dfed', '#898466'],
+      sunRadiance: 22, glow: .033, contrast: .102,
     } : originalProfile;
     const { environment, environmentIntensity } = scene;
     const lights = [];
@@ -96,7 +97,11 @@ export function createLightingPipeline(renderer, { legacy = false, coarse = fals
     }
 
     if (!target) {
+      const gl = renderer.getContext();
+      const samples = coarse ? 0 : gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES)
+        .find(count => count <= 4) ?? 0;
       target = new WebGLRenderTarget(1, 1, {
+        samples,
         type: HalfFloatType,
         minFilter: LinearFilter,
         magFilter: LinearFilter,

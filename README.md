@@ -59,4 +59,8 @@ Gaussian 細節取樣自枝葉、草地和山體的實際網格，沿表面投�
 
 `?daylight=baseline` 在這兩景保留上一版 PBR 渲染。執行 `npm run build` 與 `npm run compare:lighting -- --daylight` 可在 `release/daylight-comparison/` 取得溪岸、橋面、梯田入口與濕田的同鏡位對照。
 
+若要比對兩次正式建置，先保存舊版 `dist`，再以新版執行 `npm run build` 和 `node scripts/compare-lighting.mjs --baseline-dist <舊版目錄>`。四組實拍及相機座標會寫入 `release/creek-terrace-refinement/`。兩次拍攝都會開啟各版本預設的自然日光。
+
+溪岸與梯田的田水以鄰近地形及實際株位近似倒影。走到田邊可看到秧苗與浮萍，走向橋面可觀察掠射水光。遠林取自 Blender 杉木的兩個視角，近景使用立體樹模。植栽和遠林圖集的重建方式見 [Blender 素材說明](art/README.md)。
+
 十組設計原稿與提示詞使用方式見[繁體中文提示詞指南](README_繁體中文.md)。

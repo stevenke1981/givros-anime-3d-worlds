@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { groundAt as sakuraGroundAt, paddies as sakuraPaddies } from '../src/world/layout.js';
 import { createRegionalLayout } from '../src/world/regions/layout.js';
 import { regionalPlantings, regionalPlantModels } from '../src/world/regions/planting.js';
 
@@ -133,5 +134,18 @@ test('Scene 04 has a recessed downhill ditch beside the existing walking route',
       assert.ok(terrace.canWalk(x,z));
       assert.equal(terrace.surfaceAt(x,z), legacy.surfaceAt(x,z));
     }
+  }
+});
+
+test('Pilot paddies retain shallow planting beds inside the road grading', () => {
+  const terrace = createRegionalLayout('04', { naturalLighting: true });
+  for (const { groundAt, paddies } of [terrace, { groundAt: sakuraGroundAt, paddies: sakuraPaddies }]) {
+    for (const [x,z,,,water] of paddies) {
+      const depth = water - groundAt(x,z);
+      assert.ok(depth >= .10 && depth <= .14, `Paddy center (${x}, ${z}) depth ${depth}`);
+    }
+  }
+  for (const [x,z] of [[16.01,-12.24], [17.02,-12.45], [15.08,-12.10], [17.87,-12.43]]) {
+    assert.ok(5.60 - terrace.groundAt(x,z) > .09, `Walkway fill intrudes into paddy at (${x}, ${z})`);
   }
 });

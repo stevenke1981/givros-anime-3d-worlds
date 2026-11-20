@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createRegionalLayout } from './layout.js';
+import { createRegionalLayout, terracePathHalfWidth } from './layout.js';
 import { loadRegionalAssets, populateRegionalWorld } from './props.js';
 import { addAtmosphere, addTerrain, addHydrology, addSteam } from './terrain.js';
 import { applyAssetSurfaces } from '../surface-material.js';
@@ -7,6 +7,8 @@ import { addSurfaceDetailGeometry } from '../surface-detail-geometry.js';
 import { createVegetationWind } from '../vegetation-wind.js';
 import { createContactOcclusion } from '../contact-occlusion.js';
 import { extendRoofOverhangs } from '../roof-overhang.js';
+import { addWoodedFoothills } from '../wooded-foothills.js';
+import { randomSequence } from '../landscape.js';
 
 const trailLabels = {
   '02': '礫岸步道', '03': '竹林入口', '04': '田野入口',
@@ -28,7 +30,8 @@ export async function createRegionalWorld(id, {
   const sun=addAtmosphere(scene,layout,physicalSurfaces,naturalLighting,coarse);
   onProgress(.64,'生成河流、丘陵與步道');
   const contacts=naturalLighting ? createContactOcclusion(coarse) : undefined;
-  const groundDetail=addTerrain(scene,layout,physicalSurfaces,contacts);
+  const {groundDetail,turf}=addTerrain(scene,layout,physicalSurfaces,contacts);
+  if (naturalLighting) await addWoodedFoothills(scene,turf,groundAt,layout.riverEdge,randomSequence(97146));
   const clock=addHydrology(scene,layout,sun,useBakedMaterials,naturalLighting);
   onProgress(.83,'排列房屋、地標與林木');
   const blocks=populateRegionalWorld(scene,layout,assets,32671+Number(id)*3721);
@@ -40,6 +43,7 @@ export async function createRegionalWorld(id, {
     scene.traverse(mesh=>wind.register(mesh,mesh.userData.surfaceAsset));
     addSurfaceDetailGeometry(scene,{
       groundAt, center:spec.spawn, seed:24118+Number(id)*3721,
+      vergeDistance:layout.canal ? (x,z)=>routeBlend(x,z)[0]-terracePathHalfWidth : undefined,
       canPlace:(x,z)=>canWalk(x,z) && !blocks(x,z) && routeBlend(x,z)[0]<4.25 &&
         groundAt(x,z)>waterAt(x,z)+.1 && Math.abs(surfaceAt(x,z)-groundAt(x,z))<.1,
     });

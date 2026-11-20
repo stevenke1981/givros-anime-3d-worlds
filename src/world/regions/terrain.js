@@ -1,17 +1,19 @@
 import * as THREE from 'three';
 import { createGroundDetail, groundMaterial } from '../ground-material.js';
+import { terracePathHalfWidth } from './layout.js';
 import { mix, paddyShape, smooth } from '../layout.js';
 import { randomSequence } from '../landscape.js';
 import { waterEnvironmentGLSL } from '../../lighting/water-environment.js';
 import { daylightDirection, shapeDaylightShadows } from '../../lighting/daylight.js';
 import { cloudLayerGLSL } from '../../lighting/sky-clouds.js';
 import { createWaterMaterial, setWaterDepth } from '../water-material.js';
+import { createWaterSurroundings } from '../water-surroundings.js';
 
 function grid(w, h, sample, material) {
-  const positions = [], colors = [], covers = [], edges = [], gaussianWeights = [], wetness = [], indices = [];
+  const positions = [], colors = [], covers = [], edges = [], gaussianWeights = [], wetness = [], tracks = [], banks = [], indices = [];
   for (let j=0;j<=h;j++) {
     for (let i=0;i<=w;i++) {
-      const [x,y,z,color,cover,edge,gaussianWeight,soilWetness] = sample(i/w,j/h);
+      const [x,y,z,color,cover,edge,gaussianWeight,soilWetness,landTrack,landBank] = sample(i/w,j/h);
       positions.push(x,y,z);
       if (color) {
         colors.push(color.r,color.g,color.b);
@@ -20,6 +22,8 @@ function grid(w, h, sample, material) {
       if (edge !== undefined) edges.push(edge);
       if (gaussianWeight !== undefined) gaussianWeights.push(gaussianWeight);
       if (soilWetness !== undefined) wetness.push(soilWetness);
+      if (landTrack) tracks.push(...landTrack);
+      if (landBank !== undefined) banks.push(landBank);
       if (i===w || j===h) continue;
       const a=j*(w+1)+i,b=a+w+1;
       indices.push(a,b,a+1,a+1,b,b+1);
@@ -35,6 +39,8 @@ function grid(w, h, sample, material) {
   if (edges.length) geometry.setAttribute('wetEdge',new THREE.Float32BufferAttribute(edges,1));
   if (gaussianWeights.length) geometry.setAttribute('gaussianWeight',new THREE.Float32BufferAttribute(gaussianWeights,1));
   if (wetness.length) geometry.setAttribute('landWetness',new THREE.Float32BufferAttribute(wetness,1));
+  if (tracks.length) geometry.setAttribute('landTrack',new THREE.Float32BufferAttribute(tracks,3));
+  if (banks.length) geometry.setAttribute('landBank',new THREE.Float32BufferAttribute(banks,1));
   geometry.computeVertexNormals();
   return new THREE.Mesh(geometry,material);
 }
@@ -75,10 +81,10 @@ export function addAtmosphere(scene, layout, physicalSurfaces = false, naturalLi
   const [, , , , skyColor, ambient, warm] = spec.colors;
   scene.background = new THREE.Color(skyColor);
   scene.fog = new THREE.FogExp2(skyColor,spec.night ? .0062 : spec.snow ? .0056 : .0046);
-  scene.add(naturalLighting ? new THREE.HemisphereLight('#acccff','#5d6547',.99) :
+  scene.add(naturalLighting ? new THREE.HemisphereLight('#8cb8f0','#727653',1.22) :
     new THREE.HemisphereLight(ambient,spec.snow ? '#929bb0' : '#797365',spec.sun[4]));
   const sunDirection = naturalLighting ? daylightDirection(id) : new THREE.Vector3(...spec.sun.slice(0,3)).normalize();
-  const sun = new THREE.DirectionalLight(naturalLighting ? '#fff1d6' : warm,naturalLighting ? 3.45 : spec.sun[3]);
+  const sun = new THREE.DirectionalLight(naturalLighting ? '#ffe7be' : warm,naturalLighting ? 3.32 : spec.sun[3]);
   sun.target.position.set(0,0,-5);
   sun.position.copy(sunDirection).multiplyScalar(110).add(sun.target.position);
   sun.castShadow = true;
@@ -93,9 +99,9 @@ export function addAtmosphere(scene, layout, physicalSurfaces = false, naturalLi
   const sky = new THREE.Mesh(new THREE.SphereGeometry(480,32,18),new THREE.ShaderMaterial({
     depthWrite:false,side:THREE.BackSide,
     uniforms:{
-      horizon:{value:new THREE.Color(skyColor)},
-      zenith:{value:new THREE.Color(spec.night?'#244477':spec.snow?'#509ac3':spec.coast?'#408bcb':'#548fc2')},
-      light:{value:new THREE.Color(warm)}, solar:{value:sunDirection},
+      horizon:{value:new THREE.Color(naturalLighting?'#c5dfed':skyColor)},
+      zenith:{value:new THREE.Color(naturalLighting?'#488aca':spec.night?'#244477':spec.snow?'#509ac3':spec.coast?'#408bcb':'#548fc2')},
+      light:{value:sun.color}, solar:{value:sunDirection},
       dusk:{value:spec.night?1:0}, clouds:{value:spec.snow?.45:spec.night?.48:.90}
     },
     vertexShader:`varying vec3 ray;
@@ -137,7 +143,7 @@ export function addTerrain(scene, layout, physicalSurfaces = false, contactOcclu
   const [grass,shade,dry,path] = tuple;
   const rock = new THREE.Color(spec.snow ? '#a2adb8' : spec.coast ? '#929385' : '#858981');
   const soil = new THREE.Color(spec.snow ? '#87958f' : '#716348');
-  const wetMud = new THREE.Color('#59432d');
+  const wetMud = new THREE.Color('#836346');
   const turfDetail = createGroundDetail(physicalSurfaces,contactOcclusion);
   function map(n,min,max) {
     if (n < .118) return min - 58 * (1 - n/.118) ** 1.68;
@@ -152,7 +158,8 @@ export function addTerrain(scene, layout, physicalSurfaces = false, contactOcclu
   }
   const turf = grid(274,rows.length-1,(u,v)=>{
     const x=map(u,-54,54),z=rows[Math.round(v*(rows.length-1))],y=groundAt(x,z);
-    const [lane] = routeBlend(x,z);
+    const [across] = routeBlend(x,z,Boolean(canal));
+    const lane = Math.abs(across);
     const canopy = field(x * .14, z * .14, seed);
     const litter = field(x * .46 + canopy, z * .42, seed + 11);
     const variation = canopy * .67 + litter * .33;
@@ -161,24 +168,33 @@ export function addTerrain(scene, layout, physicalSurfaces = false, contactOcclu
     const banks=smooth(2.75,.7,bankDistance+.29*(litter-.5));
     color.lerp(rock,banks*.84);
     const wear=smooth(1.34,.66,lane+.10*Math.sin(x*1.79-z*2.14))*(1-banks*.65);
-    color.lerp(path.clone().lerp(soil,.20+(1-variation)*.18),wear);
-    let bare=Math.max(wear,banks*.85), stones=banks*.74, wetness=0;
+    if (!canal) color.lerp(path.clone().lerp(soil,.20+(1-variation)*.18),wear);
+    let bare=Math.max(wear,banks*.85), stones=banks*.74, wetness=0, bankBounce=0;
+    let roadGround = smooth(terracePathHalfWidth+1.05,terracePathHalfWidth+.70,lane) * (1-banks*.92);
     for (const [px,pz,rx,rz] of paddies) {
       if (Math.abs(x-px)>rx+1 || Math.abs(z-pz)>rz+1) continue;
       const p=paddyShape(x-px,z-pz,rx,rz);
       const mud=smooth(1.09,.78,p), berm=smooth(.89,1.02,p)*smooth(1.19,1.005,p);
       color.lerp(soil,mud).lerp(grass,berm*.36);
       bare=Math.max(bare,mud*.98);
-      if (canal) wetness=Math.max(wetness,smooth(1.055,.915,p)*.82);
+      if (canal) {
+        wetness=Math.max(wetness,smooth(1.055,.915,p)*.82);
+        roadGround *= smooth(1.01,1.12,p);
+        bankBounce=Math.max(bankBounce,smooth(.89,1.015,p)*smooth(1.25,1.065,p)*.84);
+      }
     }
     if (canal) {
       const bank = canal.edgeAt(x,z);
-      const shore = smooth(.56,.06,bank+.12*(litter-.5)) * canal.fadeAt(x);
+      const fringes = .19*(litter-.48)+.06*Math.sin(x*2.14+z*3.25);
+      const shore = smooth(.64,.015,bank+fringes) * canal.fadeAt(x);
       if (shore > 0) {
         color.lerp(soil,shore).lerp(wetMud,shore*.83);
-        bare=Math.max(bare,shore*.985);
+        bare=Math.max(bare,shore*.90);
         stones=Math.max(stones,shore*.22);
-        wetness=Math.max(wetness,smooth(.45,-.05,bank+.14*(litter-.5))*shore);
+        wetness=Math.max(wetness,smooth(.44,-.055,bank+fringes)*shore);
+        roadGround *= 1-shore;
+        bankBounce=Math.max(bankBounce,smooth(.73,.045,bank+fringes)*canal.fadeAt(x)*
+          smooth(-.16,.015,y-canal.waterAt(x)));
       }
     }
     const court=Math.hypot(x-spec.sanctuary.x,z-spec.sanctuary.z);
@@ -194,8 +210,13 @@ export function addTerrain(scene, layout, physicalSurfaces = false, contactOcclu
     }
     const dryLand = smooth(-.05,.40,bankDistance) * smooth(0,.16,y-waterAt(x,z));
     const groundCover = (1 - bare) ** 1.7 * dryLand * (.62 + litter * .36);
-    return [x,y,z,color,[bare,stones,stones*.16],undefined,groundCover,canal ? wetness : undefined];
-  },groundMaterial(turfDetail,{}, { wetSoil: Boolean(canal), receiveContacts: Boolean(contactOcclusion) }));
+    const track = canal ? [across,terracePathHalfWidth,roadGround*(1-paved)] : undefined;
+    return [x,y,z,color,[bare,stones,stones*.16],undefined,groundCover,
+      canal ? wetness : undefined,track,canal ? bankBounce : undefined];
+  },groundMaterial(turfDetail,{}, {
+    wetSoil: Boolean(canal), receiveContacts: Boolean(contactOcclusion), trackColor: canal ? path : undefined,
+    bankBounce: Boolean(canal)
+  }));
   turf.name='Continuous regional landforms and paths';
   turf.receiveShadow=true;
   turf.castShadow=Boolean(contactOcclusion);
@@ -232,13 +253,13 @@ export function addTerrain(scene, layout, physicalSurfaces = false, contactOcclu
     massif.userData.gaussianKind='mountain';
     scene.add(massif);
   }
-  return turfDetail;
+  return { turf, groundDetail: turfDetail };
 }
 
-function surfaceMaterial(clock, sun, spec, kind, floodedSoil, realisticWater) {
-  if (realisticWater) {
-    const deep = kind === 'paddy' ? '#688675' : kind === 'pool' ? '#557d82' : spec.colors[7];
-    return createWaterMaterial({ clock, sun, kind, deep, sky: spec.colors[4] });
+function surfaceMaterial(clock, sun, spec, kind, floodedSoil, surroundings) {
+  if (surroundings) {
+    const deep = kind === 'paddy' ? '#646f55' : kind === 'pool' ? '#557d82' : spec.colors[7];
+    return createWaterMaterial({ clock, sun, kind, deep, sky: spec.colors[4], surroundings });
   }
   const still = kind==='sea' || kind==='lake';
   const drained = kind==='paddy' || kind==='pool';
@@ -307,8 +328,9 @@ function surfaceMaterial(clock, sun, spec, kind, floodedSoil, realisticWater) {
 export function addHydrology(scene, layout, sun, realisticMaterials = false, realisticWater = false) {
   const { spec,paddies,baseWaterAt,centerAt,spanAt,seaEdge }=layout;
   const clock={value:0};
+  const surroundings = realisticWater ? createWaterSurroundings(scene, layout.groundAt, -36, -40, 43, 30) : undefined;
   function add(kind,w,h,point,floodedSoil=false) {
-    const material=surfaceMaterial(clock,sun,spec,kind,realisticMaterials && floodedSoil,realisticWater);
+    const material=surfaceMaterial(clock,sun,spec,kind,realisticMaterials && floodedSoil,surroundings);
     material.uniforms.clock=clock;
     const water=grid(w,h,point,material);
     water.name='Watershed '+kind;

@@ -1,24 +1,35 @@
 import { Color, DoubleSide, Float32BufferAttribute, ShaderMaterial, UniformsLib, UniformsUtils, Vector2 } from 'three';
 import { waterEnvironmentGLSL } from '../lighting/water-environment.js';
+import { waterSurroundingsGLSL } from './water-surroundings.js';
+
+export { registerWaterPlants } from './water-surroundings.js';
 
 const waterProfiles = {
   river: { current: [0, .44], wave: 1, roughness: .14, absorption: 1.6, bank: .68, soil: '#85816a' },
   sea: { current: [.07, -.20], wave: 1.22, roughness: .16, absorption: 1.24, bank: .10, soil: '#a79777' },
   lake: { current: [.06, .045], wave: .48, roughness: .105, absorption: 1.1, bank: .32, soil: '#848373' },
-  paddy: { current: [.015, .025], wave: .32, roughness: .095, absorption: .78, bank: .78, soil: '#847452' },
+  paddy: { current: [.015, .025], wave: .45, roughness: .086, absorption: .58, bank: .80, soil: '#7e6e4e' },
   pool: { current: [.025, -.02], wave: .37, roughness: .105, absorption: 1.23, bank: .82, soil: '#a19b78' },
   canal: { current: [-.32, .036], wave: .68, roughness: .13, absorption: 1.23, bank: .93, soil: '#8c7957' },
 };
 
-export function createWaterMaterial({ clock, sun, kind, deep, soil, sky }) {
+export function createWaterMaterial({ clock, sun, kind, deep, soil, sky, surroundings }) {
   const profile = waterProfiles[kind];
   return new ShaderMaterial({
     side: DoubleSide,
-    defines: { REALISTIC_WATER: 1, ...(kind === 'sea' && { WATER_SURF: 1 }) },
+    defines: {
+      REALISTIC_WATER: 1,
+      ...(kind === 'sea' && { WATER_SURF: 1 }),
+      ...(surroundings && { WATER_SURROUNDINGS: 1 }),
+    },
     lights: true,
     userData: { waterEnvironment: true },
     uniforms: {
       ...UniformsUtils.clone(UniformsLib.lights),
+      ...(surroundings && {
+        waterSurroundings: { value: surroundings.texture },
+        waterSurroundingsBounds: { value: surroundings.bounds },
+      }),
       clock, sun: { value: sun },
       waterSunColor: { value: new Color('#fff1d9') },
       waterSunIntensity: { value: 2 },
@@ -58,6 +69,7 @@ export function createWaterMaterial({ clock, sun, kind, deep, soil, sky }) {
       #include <shadowmap_pars_fragment>
       #include <shadowmask_pars_fragment>
       ${waterEnvironmentGLSL}
+      ${waterSurroundingsGLSL}
 
       float waterNoise(vec2 point) {
         vec2 cell = floor(point), f = fract(point);
@@ -72,13 +84,15 @@ export function createWaterMaterial({ clock, sun, kind, deep, soil, sky }) {
         vec2 flow = surface - clock * current;
         float broad = waterNoise(flow * vec2(.55, .39));
         float footprint = length(fwidth(surface));
-        vec2 broadSlope = vec2(.42, .90) * sin(dot(flow, vec2(2.05, 4.42)) + broad * 4. - clock * .41);
-        broadSlope += vec2(.88, -.47) * sin(dot(flow, vec2(4.08, -2.18)) + clock * .81) * .52;
-        vec2 fineSlope = vec2(-.81, .59) * sin(dot(flow, vec2(-13.4, 9.8)) + broad * 7. - clock * 1.74);
-        fineSlope += vec2(.64, .77) * sin(dot(flow, vec2(15.5, 18.7)) + clock * 1.19) * .52;
+        float crosswind = waterNoise(flow * vec2(1.6, .93) + vec2(12.7, 35.8));
+        vec2 broadSlope = vec2(.38, .92) * sin(dot(flow, vec2(2.2, 6.1)) + broad * 5. - clock * .46);
+        broadSlope += vec2(.84, -.53) * sin(dot(flow, vec2(6.8, -4.3)) + crosswind * 8. + clock * .81) * .54;
+        vec2 fineSlope = vec2(-.78, .63) * sin(dot(flow, vec2(-21.4, 17.7)) + crosswind * 7. - clock * 1.74);
+        fineSlope += vec2(.61, .79) * sin(dot(flow, vec2(20.9, 28.0)) + broad * 11. + clock * 1.19) * .58;
+        float fineVisibility = 1. - smoothstep(.026, .17, footprint);
         vec2 ripples = wave * (
-          .118 * broadSlope * (1. - smoothstep(.13, .62, footprint)) +
-          .095 * fineSlope * (1. - smoothstep(.034, .21, footprint))
+          .106 * broadSlope * (1. - smoothstep(.09, .46, footprint)) +
+          .099 * fineSlope * fineVisibility
         );
         vec3 normal = normalize(vec3(ripples.x, 1., ripples.y));
         vec3 eye = normalize(cameraPosition - waterPosition);
@@ -89,9 +103,23 @@ export function createWaterMaterial({ clock, sun, kind, deep, soil, sky }) {
         vec3 refracted = refract(-eye, normal, .7502);
         float vertical = max(.45, -dot(refracted, normal));
         vec2 bedPoint = surface + refracted.xz * waterThickness / vertical;
-        float sediment = waterNoise(bedPoint * 1.9) * .67 + waterNoise(bedPoint * 5.4) * .33;
-        vec3 bed = soilColor * (.66 + sediment * .64);
-        bed *= mix(.68, 1.08, sunVisibility);
+        float sediment = waterNoise(bedPoint * vec2(1.45, 1.84));
+        float silt = waterNoise((bedPoint + sediment * .21) * vec2(4.13, 6.73));
+        float grain = waterNoise(bedPoint * 15.7);
+        float stone = smoothstep(.70, .89, grain) * smoothstep(.28, .66, silt) * fineVisibility;
+        vec3 wetOlive = soilColor * vec3(.73, .94, .62);
+        vec3 brownSilt = soilColor * vec3(1.22, 1.06, .91);
+        vec3 bed = mix(wetOlive, brownSilt, sediment) * (.72 + silt * .37 + grain * .14 * fineVisibility);
+        bed = mix(bed, soilColor * vec3(1.34, 1.37, 1.40), stone * .71);
+        bed *= mix(.76, 1.04, sunVisibility);
+        float plantContact = 0.;
+        #ifdef WATER_SURROUNDINGS
+          vec4 submerged = sampleWaterSurroundings(bedPoint);
+          vec4 contact = sampleWaterSurroundings(surface);
+          plantContact = smoothstep(.035, .67, contact.z) * contact.w;
+          float rootSediment = smoothstep(.07, .71, submerged.z) * submerged.w;
+          bed *= 1. - .47 * rootSediment;
+        #endif
         vec3 transmission = exp(-vec3(2.45, 1.44, 1.28) * (waterThickness * absorption / vertical));
         vec3 scatter = deepColor * (.54 + broad * .19) * mix(.76, 1., sunVisibility);
         vec3 body = mix(scatter, bed, transmission);
@@ -100,9 +128,7 @@ export function createWaterMaterial({ clock, sun, kind, deep, soil, sky }) {
         float reflectedRoughness = roughness + wave * .040 * broad + min(footprint * .19, .09);
         #ifdef USE_WATER_ENVIRONMENT
           vec3 reflectedSky = sampleWaterEnvironment(reflectionRay, reflectedRoughness);
-          reflectedSky *= .96 + .60 * waterEnvironmentIntensity;
-          vec3 ambientSky = min(reflectedSky, vec3(1.25));
-          reflectedSky = ambientSky + (reflectedSky - ambientSky) * sunVisibility;
+          reflectedSky *= .79 + .24 * waterEnvironmentIntensity;
         #else
           float horizon = smoothstep(-.035, .24, reflectionRay.y);
           vec3 overhead = mix(skyColor * .83, skyColor * .56, max(reflectionRay.y, 0.));
@@ -110,18 +136,33 @@ export function createWaterMaterial({ clock, sun, kind, deep, soil, sky }) {
           overhead = mix(overhead, skyColor * 1.24, cloud * horizon * .62);
           vec3 reflectedSky = mix(skyColor * .42, overhead, smoothstep(-.23, .075, reflectionRay.y));
         #endif
-        // The sky PMREM is open sky. Banks and rice screen low reflected rays.
-        float blockedSky = bankReflection * (1. - smoothstep(-.085, .37, reflectionRay.y));
-        vec3 bank = mix(soilColor * .65, vec3(.090, .142, .082), .56);
-        vec3 reflection = mix(reflectedSky, bank, blockedSky * .77);
-        body = mix(body, reflection, fresnel * (.94 - blockedSky * .22) + .035);
+        float skyBrightness = dot(reflectedSky, vec3(.213, .715, .072));
+        reflectedSky /= 1. + skyBrightness * .87;
+        float blockedSky = bankReflection * (1. - smoothstep(-.09, .33, reflectionRay.y));
+        vec3 bank = mix(soilColor * .73, vec3(.093, .128, .059), .64);
+        vec3 reflection = mix(reflectedSky, bank, blockedSky * .52);
+        #ifdef WATER_SURROUNDINGS
+          vec2 localReflection = reflectedWaterBanks(waterPosition, reflectionRay);
+          vec3 foliage = mix(vec3(.073, .105, .043), vec3(.143, .172, .076), broad);
+          reflection = mix(reflection, bank, localReflection.x * .49);
+          reflection = mix(reflection, foliage, localReflection.y * .58);
+        #endif
+        float glaze = .11 * pow(1. - cosView, 2.7);
+        float reflectionWeight = min(.94, .022 + glaze + fresnel * (.90 - blockedSky * .14));
+        body = mix(body, reflection, reflectionWeight);
+        body *= 1. - .28 * plantContact;
 
         float lightFacing = saturate(dot(normal, sun));
         vec3 halfVector = normalize(eye + sun);
         float sunAlignment = saturate(dot(normal, halfVector));
-        float sharpness = mix(163., 67., min(1., reflectedRoughness / .28));
-        float glint = 4.6 * pow(sunAlignment, sharpness) + .22 * pow(sunAlignment, 20.);
+        float sharpness = mix(228., 98., min(1., reflectedRoughness / .28));
+        float flash = waterNoise(flow * vec2(14.3, 18.7) + vec2(.71, -.39) * clock);
+        float facet = smoothstep(.56, .87, flash * .67 + length(fineSlope) * .27) * fineVisibility;
+        float glint = (.27 + facet * 2.85) * pow(sunAlignment, sharpness) + .074 * pow(sunAlignment, 24.);
+        float skyGlint = facet * smoothstep(.10, .37, fresnel) * smoothstep(.24, .72, skyBrightness) *
+          .17 * (1. - blockedSky * .43);
         body += waterSunColor * (waterSunIntensity * sunVisibility * lightFacing * glint);
+        body += reflectedSky * skyGlint * (1. - plantContact);
 
         #ifdef WATER_SURF
           float shore = (1. - smoothstep(.10, .62, waterThickness));

@@ -59,7 +59,7 @@ test('the release loads its models, changes viewpoints, and responds to keyboard
     expect(response.ok()).toBe(true);
     expect(new URL(response.url()).pathname).toMatch(/^\/sakura\/models\//);
   }
-  for (const asset of ['meadow-grass', 'wild-azalea', 'valley-broadleaf']) {
+  for (const asset of ['meadow-grass', 'wild-azalea', 'sakura-canopy', 'valley-broadleaf-canopy', 'shore-reeds', 'rice-arching', 'duckweed']) {
     expect(modelResponses.some((response) => new URL(response.url()).pathname.endsWith('/' + asset + '.glb'))).toBe(true);
   }
   for (const asset of ['bridge', 'house']) {

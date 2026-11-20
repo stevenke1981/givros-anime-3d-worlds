@@ -25,6 +25,7 @@ export const paddies = [
   [26, -5.5, 4.6, 4.4, 1.12], [28.5, -16, 4.6, 4.4, 1.37],
   [36.5, -7, 4.4, 4.6, 1.62], [37.5, -18, 4, 4.4, 1.86],
 ];
+export const paddyBedDepth = .12;
 export const routes = [
   [[39, 30], [32, 25], [24, 24], [12, 18], [10, 10], [9, 4], [7, 1]],
   [[-7, 1], [-11, 0], [-22, -1], [-32, -2], [-43, -1], [-44, -14], [-44, -26], [-43.5, -35], [-39, -36], [-34, -41]],
@@ -44,14 +45,20 @@ const segments = routes.flatMap(route => route.slice(1).map(([bx, bz], index) =>
   return [x, z, dx, dz, dx * dx + dz * dz];
 }));
 
-export function laneDistance(x, z) {
-  let best = Infinity;
+export const sakuraPathHalfWidth = (x,z) => x < -13 && z > -5 && z < 5 ? 1.59 : 1.06;
+
+export function laneDistance(x, z, signed = false) {
+  let best = Infinity, side = 1;
   for (const [ax, az, dx, dz, length2] of segments) {
     const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / length2));
     const deltaX = x - ax - u * dx, deltaZ = z - az - u * dz;
-    best = Math.min(best, deltaX * deltaX + deltaZ * deltaZ);
+    const distance2 = deltaX * deltaX + deltaZ * deltaZ;
+    if (distance2 < best) {
+      best = distance2;
+      if (signed) side = dx * deltaZ < dz * deltaX ? -1 : 1;
+    }
   }
-  return Math.sqrt(best);
+  return Math.sqrt(best) * side;
 }
 
 export function paddyShape(dx, dz, rx, rz) {
@@ -86,7 +93,7 @@ export function groundAt(x, z) {
   for (const [px, pz, rx, rz, level] of paddies) {
     if (Math.abs(x - px) > rx + 2 || Math.abs(z - pz) > rz + 2) continue;
     const radius = paddyShape(x - px, z - pz, rx, rz);
-    const basin = mix(level - .17, level + .23, smooth(.87, 1.03, radius));
+    const basin = mix(level - paddyBedDepth, level + .23, smooth(.87, 1.03, radius));
     ground = mix(basin, ground, smooth(1.02, 1.58, radius));
   }
   const courtyard = Math.hypot((x + 18) * .85, (z + 46.5) * 1.14);

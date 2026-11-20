@@ -56,12 +56,15 @@ export function applyAssetSurfaces(scene, detail) {
       const finish = surfaceProfile(asset, mesh.name, source.name);
       const leafLight = daylight && finish === 'foliage';
       const wallWeathering = daylight && finish === 'plaster';
-      const heightDetail = leafLight || wallWeathering;
+      const bankStone = daylight && asset === 'canal-stone';
+      const facade = daylight && (asset === 'house' || asset === 'shrine');
+      const weatheredWood = facade && finish === 'wood';
+      const heightDetail = leafLight || wallWeathering || bankStone;
       const finishRoughness = !daylight ? undefined :
         finish === 'clay' ? .50 : wallWeathering ? .90 :
         asset === 'sluice' && finish !== 'hardware' && finish !== 'stone' ? .83 :
         asset === 'bridge' && /vermilion/i.test(mesh.name) ? .46 : undefined;
-      const variant = heightDetail ? finish + mesh.geometry.uuid : finish + finishRoughness;
+      const variant = (heightDetail ? finish + mesh.geometry.uuid : finish + finishRoughness) + (facade || bankStone ? asset : '');
       let perFinish = variants.get(source);
       if (!perFinish) variants.set(source, perFinish = new Map());
       if (perFinish.has(variant)) return perFinish.get(variant);
@@ -95,6 +98,7 @@ varying vec3 vMaterialPosition, vMaterialNormal;
 ${surfaceDetailGLSL}`)
           .replace('#include <color_fragment>', `#include <color_fragment>
 vec3 grainPosition = vMaterialPosition * assetDetailScale.x;
+${weatheredWood ? 'grainPosition *= vec3(3.8, .38, 3.8);' : ''}
 vec4 surfaceGrain = ${finish === 'foliage'
     ? 'texture2D(assetDetail, grainPosition.xy + grainPosition.z * vec2(.31, .53))'
     : 'surfaceTriplanar(assetDetail, grainPosition, vMaterialNormal)'};
@@ -102,20 +106,59 @@ float surfaceFade = 1.0 - smoothstep(.045, .24,
   max(length(dFdx(vMaterialPosition)), length(dFdy(vMaterialPosition))));
 float surfaceMark = (surfaceGrain.r - .4) * surfaceFade;
 diffuseColor.rgb *= 1.0 + surfaceMark * assetDetailScale.y * 5.0;
+${bankStone ? `
+float stoneHeight = smoothstep(assetHeightRange.x, assetHeightRange.y, vMaterialPosition.y);
+float mossMottle = texture2D(assetDetail, vMaterialPosition.xz * .73 + vMaterialPosition.y * vec2(.53, .26)).g;
+float mossCover = smoothstep(.33, .68, mossMottle * .71 + surfaceGrain.g * .33) *
+  smoothstep(.18, .69, stoneHeight);
+vec3 bankStoneColor = vec3(.32, .25, .17) * (.67 + surfaceGrain.g * .73);
+diffuseColor.rgb = mix(diffuseColor.rgb * vec3(1.14, 1.06, .92), bankStoneColor, .53);
+diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.22, .25, .095), mossCover * .84);
+` : ''}
+${weatheredWood ? `
+float silvering = smoothstep(.28, .68, surfaceGrain.g);
+diffuseColor.rgb = diffuseColor.rgb * vec3(1.13, 1.045, .975) +
+  vec3(.035, .020, .009) * (.45 + silvering * .55);
+` : ''}
 ${leafLight ? `
 float leafHeight = smoothstep(assetHeightRange.x, assetHeightRange.y, vMaterialPosition.y);
 diffuseColor.rgb *= mix(vec3(.61, .68, .60), vec3(1.11, 1.08, .96), leafHeight);
 ` : ''}
 ${wallWeathering ? `
-float moisture = 1.0 - smoothstep(.03, .32 + surfaceGrain.g * .10, vMaterialPosition.y - assetHeightRange.x);
-float eaveCrease = 1.0 - smoothstep(.0, .30, assetHeightRange.y - vMaterialPosition.y);
-diffuseColor.rgb *= mix(vec3(1.0), vec3(.69, .72, .59), moisture * (.46 + surfaceGrain.g * .49));
-diffuseColor.rgb *= 1. - eaveCrease * .14;
+vec2 wallUV = vec2(dot(vMaterialPosition.xz, vec2(1.,1.)), vMaterialPosition.y);
+float runoff = texture2D(assetDetail, wallUV * vec2(.34,.11)).b;
+float splash = 1. - smoothstep(.035, .20 + .32 * runoff, vMaterialPosition.y - assetHeightRange.x);
+float fleck = smoothstep(.24, .65, surfaceGrain.b);
+diffuseColor.rgb *= mix(vec3(1.), mix(vec3(.51,.48,.35), vec3(.49,.55,.37), fleck),
+  splash * (.31 + .62 * fleck));
+float eaveHeight = assetHeightRange.y;
+${facade ? `
+// The side gable rises above the eave. Use the actual authored plate height
+// along each facade instead of the maximum height of the combined plaster mesh.
+float halfWidth = ${asset === 'shrine' ? '3.' : '4.'};
+float halfDepth = ${asset === 'shrine' ? '2.5' : '3.'};
+float sideWall = step(halfWidth-.21, abs(vMaterialPosition.x));
+eaveHeight = 3.42 + sideWall * 1.77 * (1. - smoothstep(0., halfDepth, abs(vMaterialPosition.z)));
+// Locate only the paper inserts behind the modelled muntins; surrounding
+// plaster and the recessed wood frame keep their own roughness.
+vec2 panel = abs(vMaterialPosition.xz);
+float bay = halfWidth * (vMaterialPosition.z > 0. ? .75 : .25);
+float frontDepth = vMaterialPosition.z > 0. ? halfDepth - ${asset === 'shrine' ? '.83' : '0.'} : halfDepth;
+float paperLevel = ${asset === 'shrine' ? '2.46' : '2.04'};
+float facePaper = step(frontDepth+.175, panel.y) * (1. - step(halfWidth*.25-.29, abs(panel.x-bay)))
+  * (1. - step(.308, abs(vMaterialPosition.y-paperLevel)));
+float sidePaper = step(halfWidth*1.043, panel.x) * (1. - step(.415, abs(vMaterialPosition.z + ${asset === 'shrine' ? '.415' : '0.'})))
+  * (1. - step(.272, abs(vMaterialPosition.y-paperLevel-.02)));
+float shoji = max(sidePaper, facePaper);
+` : ''}
+float eaveCrease = 1. - smoothstep(.04, .52 + runoff * .22, max(0., eaveHeight - vMaterialPosition.y));
+diffuseColor.rgb *= 1. - eaveCrease * (.21 + .10 * runoff);
 ` : ''}`)
           .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
 roughnessFactor = clamp(roughnessFactor + (surfaceGrain.g - .43) * assetDetailScale.z * surfaceFade * 2.0, .18, 1.0);
 ${finishRoughness === undefined ? '' :
-  'roughnessFactor = clamp(assetFinishRoughness + (roughnessFactor - .60) * .25, .25, .98);'}`)
+  'roughnessFactor = clamp(assetFinishRoughness + (roughnessFactor - .60) * .25, .25, .98);'}
+${facade && wallWeathering ? 'roughnessFactor = mix(roughnessFactor, .39 + surfaceGrain.g * .14, shoji);' : ''}`)
           .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
 ${finish === 'hardware' ? 'metalnessFactor = mix(.62, .9, smoothstep(.26, .64, surfaceGrain.r));' : ''}`)
           .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
@@ -125,7 +168,12 @@ normal = applySurfaceRelief(-vViewPosition, normal,
 #ifndef USE_AOMAP
   float microCavity = 1.0 - smoothstep(.24, .40, surfaceGrain.a);
   reflectedLight.indirectDiffuse *= 1.0 - microCavity * surfaceFade * .095;
-#endif`);
+#endif
+${bankStone ? `
+vec3 stoneBounce = diffuseColor.rgb * vec3(.70, .62, .51);
+vec3 stoneDiffuse = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;
+reflectedLight.indirectDiffuse += max(stoneBounce - stoneDiffuse, vec3(0.0));
+` : ''}`);
         if (leafLight) {
           shader.fragmentShader = shader.fragmentShader
             .replace('#include <shadowmap_pars_fragment>',
@@ -142,7 +190,7 @@ normal = applySurfaceRelief(-vViewPosition, normal,
         }
         if (daylight) applyHeightFog(shader);
       };
-      material.customProgramCacheKey = () => `valley-surface-${finish}-${daylight}-${finishRoughness}`;
+      material.customProgramCacheKey = () => `valley-surface-${finish}-${daylight}-${finishRoughness}-${facade || bankStone ? asset : ''}`;
       return material;
     };
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(enhance) : enhance(mesh.material);

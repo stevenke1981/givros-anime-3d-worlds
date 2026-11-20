@@ -19,6 +19,8 @@ export function createVegetationWind() {
     const height = bounds.max.y - bounds.min.y;
     if (!(height > 0)) return false;
     const amplitude = /sakura|cedar|maple|broadleaf|bamboo/i.test(assetId) ? .025 : .045;
+    const transferredCanopy = /canopy[ _]normals/i.test(partName);
+    const petal = /sakura flowers/i.test(partName.replaceAll('_', ' '));
     const wrap = original => {
       const material = original.clone();
       const previousCompile = original.onBeforeCompile;
@@ -53,8 +55,27 @@ vec3 windLocal = vec3(
   dot(windDirection, windBasis[2]) / max(dot(windBasis[2], windBasis[2]), 0.0001)
 );
 transformed += windLocal * (vegetationWindAmplitude * windWave * windHeight * windHeight * vegetationWindStrength);`);
+        if (transferredCanopy) {
+          // The outward normal belongs to the crown, irrespective of which face of a petal is visible.
+          shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+#if defined(DOUBLE_SIDED) && !defined(FLAT_SHADED)
+  normal *= faceDirection;
+#endif`);
+          if (!shader.fragmentShader.includes('#include <shadowmask_pars_fragment>')) {
+            shader.fragmentShader = shader.fragmentShader.replace('#include <shadowmap_pars_fragment>',
+              '#include <shadowmap_pars_fragment>\n#include <shadowmask_pars_fragment>');
+          }
+          shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+#if NUM_DIR_LIGHTS > 0
+  vec3 canopySun = directionalLights[0].direction;
+  float canopyRim = pow(max(dot(normalize(vViewPosition), -canopySun), 0.0), 2.15);
+  float canopyTransmission = smoothstep(-.38, .72, -dot(normal, canopySun));
+  reflectedLight.directDiffuse += diffuseColor.rgb * ${petal ? 'vec3(1.0, .48, .60)' : 'vec3(.80, 1.0, .38)'} *
+    directionalLights[0].color * canopyRim * canopyTransmission * (.052 + .071 * getShadowMask());
+#endif`);
+        }
       };
-      material.customProgramCacheKey = () => `${previousKey}|vegetation-wind-v1`;
+      material.customProgramCacheKey = () => `${previousKey}|vegetation-wind-v1${transferredCanopy ? (petal ? '-petal' : '-canopy') : ''}`;
       return material;
     };
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(wrap) : wrap(mesh.material);

@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import {
   groundAt, laneDistance, mix, paddies, paddyShape, riverCenter, riverLevel,
-  riverWidth, smooth
+  riverWidth, sakuraPathHalfWidth, smooth
 } from './layout.js';
 import { groundMaterial } from './ground-material.js';
 import { cloudLayerGLSL } from '../lighting/sky-clouds.js';
 import { waterEnvironmentGLSL } from '../lighting/water-environment.js';
 import { createWaterMaterial, setWaterDepth } from './water-material.js';
+import { createWaterSurroundings } from './water-surroundings.js';
 
 export function randomSequence(initialSeed) {
   let seed = initialSeed >>> 0;
@@ -17,14 +18,16 @@ export function randomSequence(initialSeed) {
 }
 
 function landscapeMesh(w, h, pointAt, material) {
-  const positions = [], colors = [], landCover = [], wetness = [], indices = [];
+  const positions = [], colors = [], landCover = [], wetness = [], tracks = [], gaussianWeights = [], indices = [];
   for (let j = 0; j <= h; j++) {
     for (let i = 0; i <= w; i++) {
-      const [x, y, z, color, cover, damp] = pointAt(i / w, j / h);
+      const [x, y, z, color, cover, damp, track, gaussianWeight] = pointAt(i / w, j / h);
       positions.push(x, y, z);
       if (color) colors.push(color.r, color.g, color.b);
       if (cover) landCover.push(...cover);
       if (damp !== undefined) wetness.push(damp);
+      if (track) tracks.push(...track);
+      if (gaussianWeight !== undefined) gaussianWeights.push(gaussianWeight);
       if (i === w || j === h) continue;
       const a = j * (w + 1) + i, b = a + w + 1;
       indices.push(a, b, a + 1, a + 1, b, b + 1);
@@ -35,6 +38,8 @@ function landscapeMesh(w, h, pointAt, material) {
   if (colors.length) geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   if (landCover.length) geometry.setAttribute('landCover', new THREE.Float32BufferAttribute(landCover, 3));
   if (wetness.length) geometry.setAttribute('landWetness', new THREE.Float32BufferAttribute(wetness, 1));
+  if (tracks.length) geometry.setAttribute('landTrack', new THREE.Float32BufferAttribute(tracks, 3));
+  if (gaussianWeights.length) geometry.setAttribute('gaussianWeight', new THREE.Float32BufferAttribute(gaussianWeights, 1));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return new THREE.Mesh(geometry, material);
@@ -69,18 +74,19 @@ export function addTerrain(scene, detail, naturalLighting = false) {
     const grain = (rng() - .46) * .085 + .031 * Math.sin(x * 11 + z * 7);
     const color = palette.fern.clone().lerp(palette.grass, smooth(.01, .68, broad))
       .lerp(palette.straw, smooth(.51, 1, broad) * .64);
-    const path = laneDistance(x, z);
+    const across = laneDistance(x, z, naturalLighting), path = Math.abs(across);
     const bank = Math.abs(x - riverCenter(z)) - riverWidth(z);
     const shore = smooth(2.65, .53, bank + Math.sin(z * 2.5 + x * .6) * .18);
     const bankColor = palette.gravel.clone().lerp(palette.sand, smooth(-2, 1.5, bank));
     color.lerp(bankColor, shore);
-    const width = x < -13 && z > -5 && z < 5 ? 1.59 : 1.06;
+    const width = sakuraPathHalfWidth(x,z);
     const treadDistance = path + grain * 2.3 + .12 * Math.sin(z * 2.3 - x * 1.8);
     const wear = smooth(width + .27, width - .33, treadDistance) * smooth(.01, .12, y - riverLevel(z));
-    color.lerp(palette.pathShade.clone().lerp(palette.path, .61 + broad * .36), wear);
+    if (!naturalLighting) color.lerp(palette.pathShade.clone().lerp(palette.path, .61 + broad * .36), wear);
     let earth = Math.max(shore * .90, wear);
     let rocky = shore * smooth(.8, -.40, bank);
     let wetness = naturalLighting ? shore * smooth(.36, .12, y - riverLevel(z)) : undefined;
+    let roadGround = smooth(width+1.05,width+.70,path) * smooth(.06,.21,y-riverLevel(z)) * (1-shore*.94);
     for (const [px, pz, rx, rz, water] of paddies) {
       if (Math.abs(x - px) > rx + 1 || Math.abs(z - pz) > rz + 1) continue;
       const r = paddyShape(x - px, z - pz, rx, rz);
@@ -88,7 +94,10 @@ export function addTerrain(scene, detail, naturalLighting = false) {
       color.lerp(palette.mud, basin);
       earth = Math.max(earth, basin);
       color.lerp(palette.grass, smooth(.9, 1.02, r) * smooth(1.18, 1.06, r) * .5);
-      if (naturalLighting) wetness = Math.max(wetness, smooth(1.13, .95, r) * smooth(.36, .12, y - water));
+      if (naturalLighting) {
+        wetness = Math.max(wetness, smooth(1.13, .95, r) * smooth(.36, .12, y - water));
+        roadGround *= smooth(1.01,1.14,r);
+      }
     }
     const courtyard = Math.hypot((x + 18) * .86, (z + 46.5) * 1.10);
     const court = smooth(5.5, 4.2, courtyard);
@@ -96,14 +105,19 @@ export function addTerrain(scene, detail, naturalLighting = false) {
     earth = Math.max(earth, court);
     rocky = Math.max(rocky, court * .65);
     color.multiplyScalar(1 + grain);
-    return [x, y, z, color, [earth, rocky, rocky * .23], wetness];
-  }, groundMaterial(detail, { roughness: .96 }, { wetSoil: naturalLighting, receiveContacts: naturalLighting }));
+    const track = naturalLighting ? [across,width,roadGround*(1-court)] : undefined;
+    const cover = naturalLighting ? (1-earth) ** 1.7 * (1-shore*.90) * (.61+broad*.39) : undefined;
+    return [x, y, z, color, [earth, rocky, rocky * .23], wetness,track,cover];
+  }, groundMaterial(detail, { roughness: .96 }, {
+    wetSoil: naturalLighting, receiveContacts: naturalLighting, trackColor: naturalLighting ? palette.path : undefined
+  }));
   turf.receiveShadow = true;
   turf.castShadow = naturalLighting;
   if (naturalLighting) turf.material.shadowSide = THREE.FrontSide;
   turf.name = 'Sculpted river valley and earth terraces';
   turf.userData.gaussianKind = 'turf';
   scene.add(turf);
+  return turf;
 }
 
 export function addMountains(scene, detail) {
@@ -163,8 +177,8 @@ export function addSky(scene, direction = sunDirection, naturalLighting = false)
     side: THREE.BackSide,
     depthWrite: false,
     uniforms: {
-      horizon: { value: new THREE.Color('#d8edf6') },
-      zenith: { value: new THREE.Color('#4e9ad8') },
+      horizon: { value: new THREE.Color(naturalLighting ? '#c5dfed' : '#d8edf6') },
+      zenith: { value: new THREE.Color(naturalLighting ? '#488aca' : '#4e9ad8') },
       sun: { value: direction }
     },
     vertexShader: `
@@ -216,7 +230,8 @@ export function addSky(scene, direction = sunDirection, naturalLighting = false)
 
 export function addWater(scene, realisticWater = false, sunlightDirection = sunDirection) {
   const clock = { value: 0 };
-  const waterOptions = { clock, sun: sunlightDirection, sky: '#abd9e9' };
+  const surroundings = realisticWater ? createWaterSurroundings(scene, groundAt, -28, -45, 46, 31) : undefined;
+  const waterOptions = { clock, sun: sunlightDirection, sky: '#abd9e9', surroundings };
   const waterMaterial = realisticWater ? createWaterMaterial({
     ...waterOptions, kind: 'river', deep: '#1895a0', soil: '#7d785b',
   }) : new THREE.ShaderMaterial({
@@ -308,7 +323,7 @@ export function addWater(scene, realisticWater = false, sunlightDirection = sunD
   scene.add(river);
 
   const paddyMaterial = realisticWater ? createWaterMaterial({
-    ...waterOptions, kind: 'paddy', deep: '#668574', soil: '#807250',
+    ...waterOptions, kind: 'paddy', deep: '#606f56', soil: '#7f6d4c',
   }) : waterMaterial.clone();
   if (!realisticWater) {
     paddyMaterial.uniforms.clock = clock;

@@ -17,10 +17,10 @@ export function applyHeightFog(shader) {
         float surfaceDensity = exp(-shadedHeight);
         float averageDensity = abs(layerSpan) < .001
           ? surfaceDensity : (surfaceDensity - exp(-eyeHeight)) / layerSpan;
-        float hazePath = max(0., vFogDepth - 9.);
-        float aerialDepth = smoothstep(12., 52., vFogDepth) * hazePath *
-          (fogDensity * .12 + .0026 * averageDensity);
-        float distantHaze = hazePath * fogDensity * .65;
+        float hazePath = max(0., vFogDepth - 14.);
+        float aerialDepth = smoothstep(15., 68., vFogDepth) * hazePath *
+          (fogDensity * .15 + .0034 * averageDensity);
+        float distantHaze = hazePath * fogDensity * .78;
         gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, 1. - exp(-aerialDepth - distantHaze * distantHaze));
       #else
         #include <fog_fragment>

@@ -2,18 +2,21 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
   canWalk, crossings, groundAt, houseFloors, houses, laneDistance, mix, paddies, paddyShape,
-  riverCenter, riverLevel, riverWidth, shrine, stairHeight, steps, surfaceAt as surfaceY, torii
+  riverCenter, riverLevel, riverWidth, routes, sakuraPathHalfWidth, shrine, stairHeight, steps, surfaceAt as surfaceY, torii
 } from './layout.js';
 import { addMountains, addSky, addTerrain, addWater, randomSequence, sunDirection } from './landscape.js';
 import { createGroundDetail } from './ground-material.js';
-import { plantUnderstory } from './understory.js';
+import { creekPlantHeight, plantUnderstory } from './understory.js';
+import { plantDuckweed, registerRiceWaterPlants, riceTint } from './paddy-plants.js';
+import { registerWaterPlants } from './water-material.js';
 import { modelPath } from './model-path.js';
 import { applyAssetSurfaces } from './surface-material.js';
-import { addSurfaceDetailGeometry } from './surface-detail-geometry.js';
+import { addSurfaceDetailGeometry, groundEdgePlants } from './surface-detail-geometry.js';
 import { createVegetationWind } from './vegetation-wind.js';
 import { createContactOcclusion } from './contact-occlusion.js';
 import { daylightDirection, shapeDaylightShadows } from '../lighting/daylight.js';
 import { extendRoofOverhangs } from './roof-overhang.js';
+import { addWoodedFoothills } from './wooded-foothills.js';
 
 const assetNames = [
   'house', 'bridge', 'torii', 'shrine', 'sakura', 'cedar', 'cedar-lod',
@@ -21,11 +24,14 @@ const assetNames = [
   'grass', 'river-sedge', 'shrub', 'meadow-grass', 'wild-azalea', 'valley-broadleaf'
 ];
 
-async function loadAssets(onProgress, useBakedMaterials) {
+async function loadAssets(onProgress, useBakedMaterials, naturalLighting) {
   const loader = new GLTFLoader();
+  const names = naturalLighting ? [...assetNames, 'shore-reeds', 'duckweed'] : assetNames;
+  const plantModels = { rice: 'rice-arching', sakura: 'sakura-canopy', 'valley-broadleaf': 'valley-broadleaf-canopy' };
   let loaded = 0;
-  const assets = await Promise.all(assetNames.map(async name => {
-    const { scene } = await loader.loadAsync(modelPath(name, useBakedMaterials));
+  const assets = await Promise.all(names.map(async name => {
+    const model = naturalLighting ? plantModels[name] ?? name : name;
+    const { scene } = await loader.loadAsync(modelPath(model, useBakedMaterials));
     scene.updateMatrixWorld(true);
     const parts = [];
     scene.traverse(part => {
@@ -35,7 +41,7 @@ async function loadAssets(onProgress, useBakedMaterials) {
       }
     });
     if (!parts.length) throw new Error(`No mesh found in ${name}.glb`);
-    onProgress(.07 + .57 * (++loaded / assetNames.length), '載入 Blender 資產');
+    onProgress(.07 + .57 * (++loaded / names.length), '載入 Blender 資產');
     return [name, parts];
   }));
   return Object.fromEntries(assets);
@@ -55,9 +61,9 @@ function batchAsset(scene, parts, placements, { castShadow = true, receiveShadow
     }
     instances.castShadow = castShadow;
     instances.receiveShadow = receiveShadow;
-    for (const [i, [x, y, z, rotation, sx, sy = sx, sz = sx, color]] of placements.entries()) {
+    for (const [i, [x, y, z, rotation, sx, sy = sx, sz = sx, color, pitch = 0]] of placements.entries()) {
       transform.position.set(x, y, z);
-      transform.rotation.set(0, rotation, 0);
+      transform.rotation.set(pitch, rotation, 0, 'YXZ');
       transform.scale.set(sx, sy, sz);
       transform.updateMatrix();
       instances.setMatrixAt(i, matrix.multiplyMatrices(transform.matrix, part.matrixWorld));
@@ -160,8 +166,18 @@ function populate(scene, assets, naturalLighting) {
         const x = px + dx + (rand() - .5) * .18, z = pz + dz + (rand() - .5) * .18;
         if (paddyShape(x - px, z - pz, rx, rz) > .83) continue;
         const s = .83 + rand() * .30;
-        const yaw = rand() * 6.28, tint = new THREE.Color().setScalar(.80 + rand() * .20);
-        if (!naturalLighting || missing() >= .04) rice.push([x, water - .135, z, yaw, s, s, s, tint]);
+        const yaw = rand() * 6.28, shade = rand();
+        if (!naturalLighting) {
+          rice.push([x, water - .135, z, yaw, s, s, s, new THREE.Color().setScalar(.80 + shade * .20)]);
+          continue;
+        }
+        const root = groundAt(x, z) - .008;
+        const canopy = px === 16 ? creekPlantHeight(x, z) : 1;
+        if (missing() >= .04 && root < water - .025 && canopy > .14) {
+          const edgeHeight = px === 16 && paddyShape(x - px, z - pz, rx, rz) > .62 ? .85 : 1;
+          rice.push([x, root, z, yaw, s, s * mix(.89, 1.21, shade) * mix(.47, edgeHeight, canopy),
+            s, riceTint(x, z, shade)]);
+        }
       }
     }
   }
@@ -212,6 +228,10 @@ function populate(scene, assets, naturalLighting) {
   batchAsset(scene, assets.bamboo, bamboo);
   batchAsset(scene, assets.rock, rock);
   batchAsset(scene, assets.rice, rice, { castShadow: naturalLighting });
+  if (naturalLighting) {
+    registerRiceWaterPlants(scene, rice, assets.rice);
+    batchAsset(scene, assets.duckweed, plantDuckweed(paddies, groundAt, 74312), { castShadow: false });
+  }
   batchAsset(scene, assets.fence, fences);
   batchAsset(scene, assets['stone-lantern'], lanterns);
 
@@ -244,8 +264,13 @@ function populate(scene, assets, naturalLighting) {
   }
   batchAsset(scene, assets.shrub, shrubPlacements, { gaussianKind: 'shrub' });
 
-  const { grass, sedge, meadow, azalea } = plantUnderstory();
-  for (const [species, plants] of [['grass', grass], ['river-sedge', sedge], ['meadow-grass', meadow], ['wild-azalea', azalea]]) {
+  const { grass, sedge, reeds, meadow, azalea } = plantUnderstory(naturalLighting);
+  if (naturalLighting) grass.push(...groundEdgePlants({
+    routes,paddies,groundAt,laneDistance,halfWidth:sakuraPathHalfWidth,seed:49161,
+    canPlace:(x,z,y)=>canWalk(x,z) && !blocked(x,z) && y>riverLevel(z)+.10 && Math.abs(surfaceY(x,z)-y)<.10
+  }));
+  for (const [species, plants] of [['grass', grass], ['river-sedge', sedge], ['shore-reeds', reeds],
+    ['meadow-grass', meadow], ['wild-azalea', azalea]]) {
     const clusters = new Map();
     for (const plant of plants) {
       const cell = `${Math.floor(plant[0] / 24)},${Math.floor(plant[2] / 24)}`;
@@ -254,10 +279,16 @@ function populate(scene, assets, naturalLighting) {
     }
     for (const patch of clusters.values()) {
       batchAsset(scene, assets[species], patch, {
-        castShadow: naturalLighting && species === 'river-sedge',
+        castShadow: naturalLighting && (species === 'river-sedge' || species === 'shore-reeds'),
         gaussianKind: species === 'wild-azalea' ? 'shrub' : undefined,
       });
     }
+  }
+  if (naturalLighting) {
+    const bankPlants = sedge.map(([x, y, z, , , scale]) => [x, y, z, scale * .56]);
+    for (const [x, y, z, , , scale] of reeds) bankPlants.push([x, y, z, scale * 1.13]);
+    registerWaterPlants(scene, bankPlants, 'sedge');
+    registerWaterPlants(scene, shrubPlacements.map(([x, y, z, , scale]) => [x, y, z, scale]), 'shrub');
   }
 
   // Complete the distant bank with small trees below the exposed ridgeline.
@@ -333,16 +364,16 @@ export async function createSakuraWorld({
   naturalLighting = false, coarse = false,
 } = {}) {
   onProgress(.07, '準備春櫻山村');
-  const assets = await loadAssets(onProgress, useBakedMaterials);
+  const assets = await loadAssets(onProgress, useBakedMaterials, naturalLighting);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#a1cce8');
   scene.fog = new THREE.FogExp2('#c1d8e6', .0041);
   const direction = naturalLighting ? daylightDirection('01') : sunDirection;
   const skylight = naturalLighting
-    ? new THREE.HemisphereLight('#aed0ff', '#626b4b', .94)
+    ? new THREE.HemisphereLight('#90baf1', '#747353', 1.20)
     : new THREE.HemisphereLight('#e2ecff', '#8e8a70', 1.53);
   scene.add(skylight);
-  const sunlight = new THREE.DirectionalLight('#fff0d4', naturalLighting ? 3.62 : 2.1);
+  const sunlight = new THREE.DirectionalLight(naturalLighting ? '#ffe8c2' : '#fff0d4', naturalLighting ? 3.38 : 2.1);
   sunlight.target.position.set(0, 0, -11);
   sunlight.position.copy(direction).multiplyScalar(102).add(sunlight.target.position);
   sunlight.castShadow = true;
@@ -361,7 +392,9 @@ export async function createSakuraWorld({
   const groundDetail = createGroundDetail(physicalSurfaces, contacts);
   addSky(scene, direction, naturalLighting);
   addMountains(scene, groundDetail);
-  addTerrain(scene, groundDetail, naturalLighting);
+  const turf = addTerrain(scene, groundDetail, naturalLighting);
+  if (naturalLighting) await addWoodedFoothills(scene, turf, groundAt,
+    (x, z) => Math.abs(x - riverCenter(z)) - riverWidth(z), randomSequence(40641));
   const water = addWater(scene, naturalLighting, direction);
   onProgress(.87, '排列村墅、竹林與春櫻');
   const { blossomSites, blocked } = populate(scene, assets, naturalLighting);
@@ -373,6 +406,7 @@ export async function createSakuraWorld({
     scene.traverse(mesh => wind.register(mesh, mesh.userData.surfaceAsset));
     addSurfaceDetailGeometry(scene, {
       groundAt, center: [22.2, 1.76], seed: 24118,
+      vergeDistance: naturalLighting ? (x,z)=>laneDistance(x,z)-sakuraPathHalfWidth(x,z) : undefined,
       canPlace: (x, z) => canWalk(x, z) && !blocked(x, z) && laneDistance(x, z) < 4 &&
         groundAt(x, z) > riverLevel(z) + .1 && Math.abs(surfaceY(x, z) - groundAt(x, z)) < .1,
     });

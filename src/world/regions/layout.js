@@ -1,4 +1,4 @@
-import { mix, paddyShape, smooth } from '../layout.js';
+import { mix, paddyBedDepth, paddyShape, smooth } from '../layout.js';
 import { regionSpecs } from './specs.js';
 
 const modelSizes = {
@@ -10,6 +10,7 @@ const modelSizes = {
   'festival-stall': [1.61,1.12],
 };
 const waterOff = -99;
+export const terracePathHalfWidth = .96;
 
 export function createRegionalLayout(id, { naturalLighting = false } = {}) {
   const spec = regionSpecs[id];
@@ -54,14 +55,19 @@ export function createRegionalLayout(id, { naturalLighting = false } = {}) {
     const dx = x1 - x0, dz = z1 - z0;
     return [x0,z0,y0,dx,dz,y1 - y0,dx * dx + dz * dz];
   }));
-  function routeBlend(x, z) {
-    let d2 = Infinity, elevation = 0;
+  function routeBlend(x, z, signed = false) {
+    let d2 = Infinity, elevation = 0, side = 1;
     for (const [a,b,h,dx,dz,dy,l2] of segments) {
       const t = Math.max(0,Math.min(1, ((x-a)*dx+(z-b)*dz)/l2));
-      const distance2 = (a+t*dx-x)**2 + (b+t*dz-z)**2;
-      if (distance2 < d2) { d2 = distance2; elevation = h + t * dy; }
+      const ex=a+t*dx-x, ez=b+t*dz-z;
+      const distance2 = ex*ex + ez*ez;
+      if (distance2 < d2) {
+        d2 = distance2;
+        elevation = h + t * dy;
+        if (signed) side = dx * ez > dz * ex ? -1 : 1;
+      }
     }
-    return [Math.sqrt(d2),elevation];
+    return [Math.sqrt(d2)*side,elevation];
   }
 
   function riverEdge(x, z) {
@@ -113,18 +119,19 @@ export function createRegionalLayout(id, { naturalLighting = false } = {}) {
   function landscaped(x,z) {
     const [distance,h] = routeBlend(x,z);
     const edge = riverEdge(x,z), shore = seaEdge(x,z);
-    let y = naturalAt(x,z);
+    let y = naturalAt(x,z), gradeClearance = 1;
     for (const [cx,cz,rx,rz,wet] of paddies) {
       if (Math.abs(cx-x)>rx+2 || Math.abs(cz-z)>rz+2) continue;
       const d = paddyShape(x-cx,z-cz,rx,rz);
-      const waterbed = mix(wet - .17,wet + .25,smooth(.86,.99,d));
+      const waterbed = mix(wet - (canal ? paddyBedDepth : .17),wet + .25,smooth(.86,.99,d));
       y = mix(waterbed, y, smooth(1.01,1.42,d));
+      if (canal) gradeClearance = Math.min(gradeClearance,smooth(.97,1.115,d));
     }
     const r = sanctuary.model === 'temple' ? 6.2 : 5.2;
     y = mix(sanctuary.y,y,smooth(r,r+6,Math.hypot(x-sanctuary.x,(z-sanctuary.z) * .97)));
     if (pool) y = mix(pool[2], y, smooth(3.1,4.5,Math.hypot(x-pool[0],z-pool[1])));
     const active = smooth(-.16,.31,edge) * smooth(-.15,.52,shore);
-    y = mix(y,h, smooth(3.6,.88,distance) * active);
+    y = mix(y,h, smooth(3.6,.88,distance) * active * gradeClearance);
     for (const bridge of crossings) {
       if (Math.abs(z-bridge.z) > 2.1) continue;
       const lateral = Math.abs(x-bridge.x) - bridge.half;

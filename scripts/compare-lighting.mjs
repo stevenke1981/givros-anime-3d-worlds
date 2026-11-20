@@ -5,8 +5,11 @@ import { chromium } from '@playwright/test';
 import { preview } from 'vite';
 
 const compareSurfaces = process.argv.includes('--surfaces');
-const compareDaylight = process.argv.includes('--daylight');
-const destination = resolve(compareDaylight ? 'release/daylight-comparison' :
+const baselineArg = process.argv.indexOf('--baseline-dist');
+const baselineDist = baselineArg === -1 ? null : process.argv[baselineArg + 1];
+if (baselineArg !== -1 && (!baselineDist || baselineDist.startsWith('--'))) throw new Error('Expected a built dist directory after --baseline-dist');
+const compareDaylight = Boolean(baselineDist) || process.argv.includes('--daylight');
+const destination = resolve(baselineDist ? 'release/creek-terrace-refinement' : compareDaylight ? 'release/daylight-comparison' :
   compareSurfaces ? 'release/physical-surface-comparison' : 'release/lighting-comparison');
 const shots = [
   ['01', 'meadow', 'sakura-creek'],
@@ -22,8 +25,12 @@ await mkdir(destination, { recursive: true });
 
 const server = await preview({ base: '/sakura/', preview: { host: '127.0.0.1', port: 0 } });
 const site = `http://127.0.0.1:${server.httpServer.address().port}/sakura/`;
+let previous;
 let browser;
 try {
+  if (baselineDist) previous = await preview({
+    base: '/sakura/', build: { outDir: resolve(baselineDist) }, preview: { host: '127.0.0.1', port: 0 },
+  });
   browser = await chromium.launch({
     executablePath: process.env.SAKURA_CHROMIUM || undefined,
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
@@ -37,9 +44,11 @@ try {
   for (const [scene, view, name] of shots) {
     const captures = [];
     for (const lighting of ['legacy', 'enhanced']) {
-      const variant = compareDaylight ? `daylight=${lighting === 'legacy' ? 'baseline' : 'natural'}` :
+      const daylight = lighting === 'legacy' && !baselineDist ? 'baseline' : 'natural';
+      const variant = compareDaylight ? `daylight=${daylight}` :
         compareSurfaces ? `surface=${lighting}&daylight=baseline` : `lighting=${lighting}&daylight=baseline`;
-      await page.goto(`${site}?scene=${scene}&${variant}&trace-lighting`);
+      const origin = previous && lighting === 'legacy' ? `http://127.0.0.1:${previous.httpServer.address().port}/sakura/` : site;
+      await page.goto(`${origin}?scene=${scene}&${variant}&trace-lighting`);
       await page.locator(`#explorer[data-state="ready"][data-scene="${scene}"]`).waitFor({ timeout: 90_000 });
       const selected = page.locator(`[data-view="${view}"]`);
       if (await selected.getAttribute('aria-pressed') !== 'true') await selected.click();
@@ -47,7 +56,7 @@ try {
       assert.equal(await explorer.getAttribute('data-lighting'),
         !compareDaylight && !compareSurfaces && lighting === 'legacy' ? 'legacy' : 'hdr-post');
       if (compareDaylight) {
-        assert.equal(await explorer.getAttribute('data-daylight'), lighting === 'legacy' ? 'baseline' : 'natural');
+        assert.equal(await explorer.getAttribute('data-daylight'), daylight);
       } else if (compareSurfaces) {
         assert.equal(await explorer.getAttribute('data-surface'), lighting === 'legacy' ? 'legacy' : 'physical');
       }
@@ -67,5 +76,6 @@ try {
   await writeFile(resolve(destination, 'camera-poses.json'), JSON.stringify(evidence, null, 2) + '\n');
 } finally {
   await browser?.close();
-  await new Promise((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve()));
+  await Promise.all([server, previous].filter(Boolean).map(instance =>
+    new Promise((resolve, reject) => instance.httpServer.close(error => error ? reject(error) : resolve()))));
 }

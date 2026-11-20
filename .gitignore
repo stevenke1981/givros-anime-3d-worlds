@@ -4,5 +4,6 @@
 /playwright-report/
 /test-results/
 /result_*.md
+/result_*.html
 __pycache__/
 *.blend1
