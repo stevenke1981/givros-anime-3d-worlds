@@ -21,9 +21,9 @@ const contactParts = {
   grass: [/grass/, .14, .26],
 };
 
-export function createContactOcclusion(coarse) {
+export function createContactOcclusion(coarse, terrace = false) {
   const size = coarse ? 512 : 768;
-  const area = new Vector4(-65, -75, 132, 130);
+  const area = terrace ? new Vector4(-55, -62, 112, 108) : new Vector4(-65, -75, 132, 130);
   const data = new Uint8Array(size * size).fill(255);
   const texture = new DataTexture(data, size, size, RedFormat);
   texture.minFilter = texture.magFilter = LinearFilter;
@@ -40,7 +40,9 @@ export function createContactOcclusion(coarse) {
       const config = contactParts[mesh.userData.surfaceAsset];
       if (!mesh.isInstancedMesh || !config) return;
       const [label, footprint, strength] = config;
-      if (!label.test(mesh.name.toLowerCase().replaceAll('_', ' '))) return;
+      const partName = mesh.name.toLowerCase().replaceAll('_', ' ');
+      const gateFeet = terrace && mesh.userData.surfaceAsset === 'sluice';
+      if (gateFeet ? !/wing walls/.test(partName) : !label.test(partName)) return;
       const geometry = mesh.geometry;
       if (!geometry.boundingBox) geometry.computeBoundingBox();
       const { min, max } = geometry.boundingBox;
@@ -56,12 +58,15 @@ export function createContactOcclusion(coarse) {
         const cz = (min.z + max.z) / 2;
         const width = (max.x - min.x) / 2;
         const length = (max.z - min.z) / 2;
-        if (footprint === 'ends-x') {
+        if (gateFeet) {
+          for (const side of [-1, 1]) stamp(cx + width * .72 * side, cz + .01, .73, .81, true);
+        } else if (footprint === 'ends-x') {
           const separation = mesh.userData.surfaceAsset === 'sluice' ? .84 : .78;
           stamp(cx - width * separation, cz, Math.max(.27, width * .22), Math.max(.30, length * .80), false);
           stamp(cx + width * separation, cz, Math.max(.27, width * .22), Math.max(.30, length * .80), false);
         } else if (typeof footprint === 'number') {
-          stamp(0, 0, footprint, footprint, false);
+          const radius = terrace && /trunk/.test(partName) ? footprint * 1.26 : footprint;
+          stamp(0, 0, radius, radius, false);
         } else {
           stamp(cx, cz, width + .13, length + .13, footprint === 'box');
         }

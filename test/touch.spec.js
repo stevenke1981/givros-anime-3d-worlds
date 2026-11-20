@@ -2,6 +2,16 @@ import { expect, test } from '@playwright/test';
 
 test.describe('touch viewport', () => {
   test('exposes walking controls and keeps navigation usable', async ({ page }, info) => {
+    const errors = [];
+    page.on('console', (message) => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
+    await page.addInitScript(() => {
+      const getExtension = WebGL2RenderingContext.prototype.getExtension;
+      WebGL2RenderingContext.prototype.getExtension = function (name) {
+        return name === 'EXT_color_buffer_float' ? null : getExtension.call(this, name);
+      };
+    });
     await page.goto('./?trace-walk');
     const explorer = page.locator('#explorer');
     await expect(explorer).toHaveAttribute('data-state', 'ready', { timeout: 45_000 });
@@ -36,9 +46,11 @@ test.describe('touch viewport', () => {
     await expect(sceneMenu.locator('[data-scene-choice]')).toHaveCount(10);
     await sceneMenu.locator('[data-scene-choice="04"]').tap();
     await expect(explorer).toHaveAttribute('data-scene', '04', { timeout: 70_000 });
+    await expect(explorer).toHaveAttribute('data-lighting', 'aces-direct');
     await expect(explorer).toHaveAttribute('data-daylight', 'natural');
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('水田梯田農村');
     await page.screenshot({ path: info.outputPath('mobile-terraces.png') });
     await walkOnTouch();
+    expect(errors).toEqual([]);
   });
 });

@@ -29,17 +29,17 @@ export async function createRegionalWorld(id, {
   if (renderer?.shadowMap) renderer.shadowMap.enabled=true;
   const sun=addAtmosphere(scene,layout,physicalSurfaces,naturalLighting,coarse);
   onProgress(.64,'生成河流、丘陵與步道');
-  const contacts=naturalLighting ? createContactOcclusion(coarse) : undefined;
+  const contacts=naturalLighting ? createContactOcclusion(coarse, Boolean(layout.canal)) : undefined;
   const {groundDetail,turf}=addTerrain(scene,layout,physicalSurfaces,contacts);
   if (naturalLighting) await addWoodedFoothills(scene,turf,groundAt,layout.riverEdge,randomSequence(97146));
-  const clock=addHydrology(scene,layout,sun,useBakedMaterials,naturalLighting);
+  const clock=addHydrology(scene,layout,sun,useBakedMaterials,naturalLighting,contacts);
   onProgress(.83,'排列房屋、地標與林木');
   const blocks=populateRegionalWorld(scene,layout,assets,32671+Number(id)*3721);
   if (naturalLighting) extendRoofOverhangs(scene);
   contacts?.bake(scene);
   const wind=physicalSurfaces ? createVegetationWind() : undefined;
   if (wind) {
-    applyAssetSurfaces(scene,groundDetail);
+    applyAssetSurfaces(scene,groundDetail,Boolean(layout.canal));
     scene.traverse(mesh=>wind.register(mesh,mesh.userData.surfaceAsset));
     addSurfaceDetailGeometry(scene,{
       groundAt, center:spec.spawn, seed:24118+Number(id)*3721,

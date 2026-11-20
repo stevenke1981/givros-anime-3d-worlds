@@ -8,6 +8,7 @@ import { daylightDirection, shapeDaylightShadows } from '../../lighting/daylight
 import { cloudLayerGLSL } from '../../lighting/sky-clouds.js';
 import { createWaterMaterial, setWaterDepth } from '../water-material.js';
 import { createWaterSurroundings } from '../water-surroundings.js';
+import { createWaterRippleMap } from '../water-ripple-map.js';
 
 function grid(w, h, sample, material) {
   const positions = [], colors = [], covers = [], edges = [], gaussianWeights = [], wetness = [], tracks = [], banks = [], indices = [];
@@ -81,10 +82,10 @@ export function addAtmosphere(scene, layout, physicalSurfaces = false, naturalLi
   const [, , , , skyColor, ambient, warm] = spec.colors;
   scene.background = new THREE.Color(skyColor);
   scene.fog = new THREE.FogExp2(skyColor,spec.night ? .0062 : spec.snow ? .0056 : .0046);
-  scene.add(naturalLighting ? new THREE.HemisphereLight('#8cb8f0','#727653',1.22) :
+  scene.add(naturalLighting ? new THREE.HemisphereLight('#8eb8ec','#727653',1.10) :
     new THREE.HemisphereLight(ambient,spec.snow ? '#929bb0' : '#797365',spec.sun[4]));
   const sunDirection = naturalLighting ? daylightDirection(id) : new THREE.Vector3(...spec.sun.slice(0,3)).normalize();
-  const sun = new THREE.DirectionalLight(naturalLighting ? '#ffe7be' : warm,naturalLighting ? 3.32 : spec.sun[3]);
+  const sun = new THREE.DirectionalLight(naturalLighting ? '#ffe9c8' : warm,naturalLighting ? 3.55 : spec.sun[3]);
   sun.target.position.set(0,0,-5);
   sun.position.copy(sunDirection).multiplyScalar(110).add(sun.target.position);
   sun.castShadow = true;
@@ -93,7 +94,11 @@ export function addAtmosphere(scene, layout, physicalSurfaces = false, naturalLi
   sun.shadow.bias=-.00015;
   Object.assign(sun.shadow.camera,{left:-48,right:48,top:56,bottom:-56,near:3,far:193});
   sun.shadow.camera.updateProjectionMatrix();
-  if (naturalLighting) shapeDaylightShadows(sun,coarse);
+  if (naturalLighting) {
+    shapeDaylightShadows(sun,coarse);
+    sun.shadow.normalBias = .017;
+    sun.shadow.bias = -.00010;
+  }
   scene.add(sun,sun.target);
 
   const sky = new THREE.Mesh(new THREE.SphereGeometry(480,32,18),new THREE.ShaderMaterial({
@@ -256,10 +261,13 @@ export function addTerrain(scene, layout, physicalSurfaces = false, contactOcclu
   return { turf, groundDetail: turfDetail };
 }
 
-function surfaceMaterial(clock, sun, spec, kind, floodedSoil, surroundings) {
+function surfaceMaterial(clock, sun, spec, kind, floodedSoil, surroundings, rippleMap) {
   if (surroundings) {
-    const deep = kind === 'paddy' ? '#646f55' : kind === 'pool' ? '#557d82' : spec.colors[7];
-    return createWaterMaterial({ clock, sun, kind, deep, sky: spec.colors[4], surroundings });
+    const deep = kind === 'paddy' ? '#646f55' : kind === 'canal' ? '#7f8d85' :
+      kind === 'pool' ? '#557d82' : spec.colors[7];
+    const soil = kind === 'paddy' ? '#746348' : kind === 'canal' ? '#938870' : undefined;
+    return createWaterMaterial({ clock, sun, kind, deep, soil, sky: spec.colors[4], surroundings,
+      rippleMap, gateX: spec.sluice?.[0] });
   }
   const still = kind==='sea' || kind==='lake';
   const drained = kind==='paddy' || kind==='pool';
@@ -325,16 +333,35 @@ function surfaceMaterial(clock, sun, spec, kind, floodedSoil, surroundings) {
   });
 }
 
-export function addHydrology(scene, layout, sun, realisticMaterials = false, realisticWater = false) {
+export function addHydrology(scene, layout, sun, realisticMaterials = false, realisticWater = false, contacts) {
   const { spec,paddies,baseWaterAt,centerAt,spanAt,seaEdge }=layout;
   const clock={value:0};
   const surroundings = realisticWater ? createWaterSurroundings(scene, layout.groundAt, -36, -40, 43, 30) : undefined;
+  const rippleMap = realisticWater && layout.canal ? createWaterRippleMap() : undefined;
+  const materials = new Map();
   function add(kind,w,h,point,floodedSoil=false) {
-    const material=surfaceMaterial(clock,sun,spec,kind,realisticMaterials && floodedSoil,surroundings);
-    material.uniforms.clock=clock;
+    const key = realisticMaterials && floodedSoil ? kind + '-flooded' : kind;
+    let material = materials.get(key);
+    if (!material) {
+      const ripple = kind === 'paddy' || kind === 'canal' ? rippleMap : undefined;
+      material = surfaceMaterial(clock,sun,spec,kind,realisticMaterials && floodedSoil,surroundings,ripple);
+      material.uniforms.clock=clock;
+      if (ripple && contacts) {
+        material.defines.TERRACE_WATER_CONTACT = 1;
+        material.uniforms.shoreContactMap = { value: contacts.texture };
+        material.uniforms.shoreContactArea = { value: contacts.area };
+      }
+      materials.set(key, material);
+    }
     const water=grid(w,h,point,material);
     water.name='Watershed '+kind;
     if (realisticWater) setWaterDepth(water, layout.groundAt);
+    if (kind === 'canal' && rippleMap) {
+      const position = water.geometry.attributes.position;
+      const offsets = new Float32Array(position.count);
+      for (let i=0;i<offsets.length;i++) offsets[i] = position.getZ(i) - layout.canal.centerAt(position.getX(i));
+      water.geometry.setAttribute('acrossCanal', new THREE.BufferAttribute(offsets, 1));
+    }
     scene.add(water);
   }
   const start=spec.lake?10:-120,end=spec.coast?30:78;

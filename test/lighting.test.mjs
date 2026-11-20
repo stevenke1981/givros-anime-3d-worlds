@@ -10,6 +10,8 @@ import { createSkyRadiance } from '../src/lighting/sky.js';
 import { scenes } from '../src/world/catalog.js';
 import { createRegionalLayout } from '../src/world/regions/layout.js';
 import { addHydrology } from '../src/world/regions/terrain.js';
+import { createContactOcclusion } from '../src/world/contact-occlusion.js';
+import { disposeScene } from '../src/world/dispose-scene.js';
 
 test('each landscape has finite HDR radiance and the festival has a darker zenith than snow country', () => {
   assert.deepEqual(Object.keys(lightingProfiles).sort(), scenes.map(scene => scene.id).sort());
@@ -107,4 +109,31 @@ test('physical water uses the HDR sky cubemap only while the lighting pipeline o
     assert.deepEqual(material.defines, defines);
     assert.deepEqual(Object.keys(material.uniforms), uniformNames);
   }
+});
+
+test('the terrace paddies and curved canal share rolling normals and shore contacts', () => {
+  const scene = new Scene();
+  const layout = createRegionalLayout('04', { naturalLighting: true });
+  const contacts = createContactOcclusion(true, true);
+  const clock = addHydrology(scene, layout, new Vector3(.3, .5, .8).normalize(), true, true, contacts);
+  const paddies = scene.children.filter(mesh => mesh.name === 'Watershed paddy');
+  const canal = scene.getObjectByName('Watershed canal');
+  const rippleMap = canal.material.uniforms.rippleNormalMap.value;
+  assert.equal(paddies.length, layout.paddies.length);
+  for (const mesh of [...paddies, canal]) {
+    assert.equal(mesh.receiveShadow, true);
+    assert.equal(mesh.material.uniforms.clock, clock);
+    assert.equal(mesh.material.uniforms.rippleNormalMap.value, rippleMap);
+    assert.equal(mesh.material.uniforms.shoreContactMap.value, contacts.texture);
+    assert.ok(mesh.material.uniforms.roughness.value >= .05 && mesh.material.uniforms.roughness.value <= .10);
+  }
+  const { position, acrossCanal } = canal.geometry.attributes;
+  assert.equal(position.count, acrossCanal.count);
+  for (let i=0;i<position.count;i++) {
+    assert.ok(Math.abs(acrossCanal.getX(i) - (position.getZ(i) - layout.canal.centerAt(position.getX(i)))) < 1e-5);
+  }
+  let disposals = 0;
+  rippleMap.addEventListener('dispose', () => disposals++);
+  disposeScene(scene);
+  assert.equal(disposals, 1);
 });

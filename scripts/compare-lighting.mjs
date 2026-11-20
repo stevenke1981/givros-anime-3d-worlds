@@ -8,17 +8,22 @@ const compareSurfaces = process.argv.includes('--surfaces');
 const baselineArg = process.argv.indexOf('--baseline-dist');
 const baselineDist = baselineArg === -1 ? null : process.argv[baselineArg + 1];
 if (baselineArg !== -1 && (!baselineDist || baselineDist.startsWith('--'))) throw new Error('Expected a built dist directory after --baseline-dist');
-const compareDaylight = Boolean(baselineDist) || process.argv.includes('--daylight');
-const destination = resolve(baselineDist ? 'release/creek-terrace-refinement' : compareDaylight ? 'release/daylight-comparison' :
+const terraceOnly = process.argv.includes('--terrace');
+const compareDaylight = terraceOnly || Boolean(baselineDist) || process.argv.includes('--daylight');
+const destination = resolve(terraceOnly ? 'release/terrace-water-study' : baselineDist ? 'release/creek-terrace-refinement' : compareDaylight ? 'release/daylight-comparison' :
   compareSurfaces ? 'release/physical-surface-comparison' : 'release/lighting-comparison');
-const shots = [
+const shots = terraceOnly ? [
+  ['04', 'trail', 'terrace-entry'],
+  ['04', 'fields', 'flooded-fields'],
+  ['04', 'landmark', 'sluice-and-farmhouses'],
+] : [
   ['01', 'meadow', 'sakura-creek'],
   ['04', 'trail', 'rice-terraces'],
 ];
-if (compareSurfaces && !compareDaylight) shots.push(['08', 'waterfront', 'coastal-waterfront']);
-if (compareDaylight) {
+if (!terraceOnly && compareSurfaces && !compareDaylight) shots.push(['08', 'waterfront', 'coastal-waterfront']);
+if (!terraceOnly && compareDaylight) {
   shots.push(['01', 'bridge', 'bridge-and-water'], ['04', 'fields', 'flooded-fields']);
-} else if (process.argv.includes('--night')) {
+} else if (!terraceOnly && process.argv.includes('--night')) {
   shots.push(['10', 'trail', 'festival-night']);
 }
 await mkdir(destination, { recursive: true });

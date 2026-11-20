@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 
 const sunAngles = {
   '01': [27, 149],
-  '04': [29, 134],
+  '04': [28, 158],
 };
 
 export function supportsNaturalLighting(id) {
